@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Water, real-time 3D boat simulator in your browser</title>
+<meta name="description" content="A real-time 3D boat simulator that runs in your browser, no install. Physically-based JONSWAP ocean, six-degree-of-freedom hull dynamics at 240 Hz, eight boats, and a sea full of wildlife. Built with vanilla Three.js.">
+<meta name="theme-color" content="#06121f">
+<link rel="canonical" href="https://boat.trilogik.net/">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Open Water">
+<meta property="og:title" content="Open Water, real-time 3D boat simulator in your browser">
+<meta property="og:description" content="Take the helm of a physically-based ocean: a JONSWAP wave spectrum, 6-DOF hull dynamics at 240 Hz, eight boats, and a living sea with whales, manta rays and seabirds. Runs in your browser, no install. Vanilla Three.js, zero build step.">
+<meta property="og:url" content="https://boat.trilogik.net/">
+<meta property="og:image" content="https://boat.trilogik.net/ogimage.png">
+<meta property="og:image:width" content="1614">
+<meta property="og:image:height" content="975">
+<meta property="og:image:alt" content="A motoryacht cutting across a sunlit turquoise sea in the Open Water simulator.">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:creator" content="@bob6664569">
+<meta name="twitter:title" content="Open Water, real-time 3D boat simulator in your browser">
+<meta name="twitter:description" content="A physically-based ocean in your browser: JONSWAP waves, 6-DOF hull dynamics at 240 Hz, eight boats, and a sea full of wildlife. No install. Vanilla Three.js.">
+<meta name="twitter:image" content="https://boat.trilogik.net/ogimage.png">
+<meta name="twitter:image:alt" content="A motoryacht cutting across a sunlit turquoise sea in the Open Water simulator.">
+<style>
+  :root { --glass: rgba(5, 20, 32, .58); --line: rgba(255,255,255,.16); --ice: #a8e3ff; --ease: cubic-bezier(.16,1,.3,1);
+    --control-bg: rgba(5, 20, 32, .42); --control-line: rgba(255,255,255,.2);
+    --control-shadow: 0 5px 18px rgba(0,0,0,.18); --control-active: rgba(124,207,244,.14);
+    /* dock caché sous l'écran au départ ; --dock-lift remonte qualité/achievements en même temps
+       que le sélecteur remonte (--dock-slide 100%->0%). Bascule via body.dock-revealed. */
+    --dock-lift: 0px; --dock-slide: 100%;
+    /* intensité des vagues (#controls) cachée hors du bord droit, entre plus tard par la droite */
+    --controls-slide: calc(100% + 18px); }
+  body.dock-revealed { --dock-lift: 76px; --dock-slide: 0%; }
+  body.controls-revealed { --controls-slide: 0px; }
+  *, *::before, *::after { box-sizing: border-box; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #06121f; overscroll-behavior: none; }
+  body { color: rgba(255,255,255,.94); font-family: "Avenir Next", Avenir, sans-serif; }
+  canvas { display: block; touch-action: none; } /* le canvas gère lui-même orbite/pincement */
+  #hud { position: fixed; z-index: 8; top: 18px; left: 18px; user-select: none; pointer-events: none; text-shadow: 0 1px 5px rgba(0,0,0,.5); }
+  #hud .speed { font: 600 34px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: -.05em; }
+  #hud .speed small { font-size: 12px; font-weight: 500; letter-spacing: .08em; opacity: .68; }
+  #hud .metric-label { margin-top: 4px; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; opacity: .6; }
+  .bar { width: 140px; height: 4px; background: rgba(255,255,255,.2); border-radius: 4px; margin: 8px 0 2px; overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 4px; background: var(--ice); transition: width .08s, margin-left .08s; }
+  #throttle i { width: 0; }
+  #rudder i { width: 4px; margin-left: 68px; }
+  #throttle i.reverse { background: #ff9d7f; }
+  #controls { position: fixed; z-index: 8; top: 18px; right: 18px; display: grid; gap: 9px; justify-items: end; pointer-events: none;
+    transform: translateX(var(--controls-slide)); }
+  #controls > * { pointer-events: auto; } /* orbite possible dans les interstices */
+  .glass { background: var(--glass); box-shadow: 0 14px 38px rgba(0,0,0,.2); backdrop-filter: blur(16px) saturate(125%); -webkit-backdrop-filter: blur(16px) saturate(125%); }
+  .control-title { font-size: 9px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.54); }
+  .wave-option:focus-visible, .vessel-arrow:focus-visible { outline: 2px solid var(--ice); outline-offset: 3px; }
+  #wave-control { padding: 11px; border-radius: 14px; }
+  body:not(.touch) #wave-control { background: rgba(14,40,60,.4); }
+  .control-title { display: block; margin: 0 0 8px 3px; }
+  .wave-options { display: flex; gap: 5px; }
+  .wave-option { width: 46px; height: 46px; padding: 4px 2px; border: 1px solid transparent; border-radius: 10px; color: rgba(255,255,255,.65); background: transparent; cursor: pointer; transition: color .2s, background .2s, border-color .2s, transform .18s var(--ease); }
+  .wave-option:hover { color: white; background: rgba(255,255,255,.08); transform: translateY(-1px); }
+  .wave-option.active { color: var(--ice); background: rgba(124,207,244,.14); }
+  .wave-option svg { display: block; width: 26px; height: 18px; margin: 0 auto 2px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+  .wave-option span { font: 8px/1 "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+  #sea-trial-prompt { width: 100%; max-height: 0; display: flex; flex-direction: column; align-items: center;
+    margin-top: 0; overflow: hidden; color: rgba(242,250,253,.9); text-align: center;
+    opacity: 0; transform: translateY(-7px); pointer-events: none; text-shadow: 0 2px 7px rgba(0,0,0,.62);
+    transition: max-height .45s var(--ease), margin-top .45s var(--ease), opacity .35s var(--ease), transform .45s var(--ease); }
+  body.sea-trial-visible #sea-trial-prompt { max-height: 92px; margin-top: 9px; opacity: 1; transform: none; }
+  .sea-trial-arrow { display: block; width: 66px; height: 34px; margin-bottom: 9px; overflow: visible;
+    fill: none; stroke: rgba(247,252,255,.9); stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); animation: sea-trial-point 1.45s var(--ease) infinite; }
+  .sea-trial-copy strong { display: block; font: italic 400 16px/1.05 Georgia, "Times New Roman", serif; }
+  .sea-trial-copy small { display: block; margin-top: 6px; color: rgba(230,244,250,.62);
+    font: 700 7px/1.2 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; }
+  @keyframes sea-trial-point { 50% { transform: translateY(-3px); opacity: .58; } }
+  #help { position: fixed; z-index: 8; bottom: 90px; left: 50%; transform: translateX(-50%); font: 10px/1.5 "SF Mono", ui-monospace, Menlo, monospace; color: rgba(255,255,255,.58); text-shadow: 0 1px 3px rgba(0,0,0,.6); user-select: none; pointer-events: none; white-space: nowrap; }
+  #camera-status { position: fixed; z-index: 9; bottom: 116px; left: 50%; padding: 5px 9px; border-radius: 8px;
+    color: rgba(255,255,255,.72); background: rgba(3,18,30,.36);
+    backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); font: 9px/1.2 "SF Mono", ui-monospace, Menlo, monospace;
+    letter-spacing: .08em; text-transform: uppercase; pointer-events: none; opacity: 0; transform: translate(-50%, 4px);
+    transition: opacity .22s var(--ease), transform .22s var(--ease); }
+  #camera-status.visible { opacity: 1; transform: translate(-50%, 0); }
+  /* ---- qualité : petit instrument de bord, volontairement discret et monochrome ---- */
+  #quality-control { --quality-tone: rgba(228,241,250,.82); position: fixed; z-index: 11; left: 18px; bottom: calc(14px + var(--dock-lift));
+    height: 36px; min-width: 92px; display: flex; align-items: center; gap: 8px; padding: 0 19px 0 9px; border-radius: 10px;
+    color: rgba(224,239,249,.58); background: rgba(3,16,27,.44); box-shadow: 0 6px 16px rgba(0,0,0,.14);
+    cursor: pointer; transition: opacity .55s .32s var(--ease), border-color .25s, background .25s, transform .2s var(--ease), bottom .6s var(--ease); }
+  #quality-control::after { content: "⌄"; position: absolute; right: 7px; top: 12px; color: rgba(224,239,249,.3);
+    font: 10px/1 Georgia, serif; pointer-events: none; transition: color .2s, transform .2s var(--ease); }
+  #quality-control:hover { background: rgba(5,21,34,.52); transform: translateY(-1px); }
+  #quality-control:hover::after { color: var(--quality-tone); transform: translateY(1px); }
+  #quality-control:focus-within { outline: 1px solid rgba(228,241,250,.4); outline-offset: 2px; }
+  .quality-gauge { width: 22px; height: 22px; flex: 0 0 auto; color: var(--quality-tone); }
+  .quality-gauge svg { display: block; width: 100%; height: 100%; }
+  .quality-gauge .qb { fill: currentColor; opacity: .2; transition: opacity .35s var(--ease); }
+  #quality-control[data-quality="low"]    .qb:nth-child(-n+1),
+  #quality-control[data-quality="medium"] .qb:nth-child(-n+2),
+  #quality-control[data-quality="high"]   .qb:nth-child(-n+3),
+  #quality-control[data-quality="ultra"]  .qb:nth-child(-n+4) { opacity: .9; }
+  .quality-readout { min-width: 40px; line-height: 1; pointer-events: none; }
+  .quality-readout small { display: block; margin-bottom: 3px; color: rgba(220,239,251,.36);
+    font: 700 6px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; }
+  #quality-current { display: block; color: var(--quality-tone); font: 700 9px/1 "SF Mono", ui-monospace, monospace;
+    letter-spacing: .08em; text-transform: uppercase; transition: color .25s; }
+  #quality-select { position: absolute; z-index: 3; inset: 0; width: 100%; height: 100%; border: 0;
+    opacity: .001; cursor: pointer; }
+  /* ---- achievements : journal de bord discret, persistant et non modal ---- */
+  #achievements-button { position: fixed; z-index: 12; right: 18px; left: auto; bottom: calc(14px + var(--dock-lift));
+    height: 36px; min-width: 130px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid rgba(228,241,250,.09);
+    border-radius: 10px; color: rgba(224,239,249,.62); background: rgba(3,16,27,.48);
+    box-shadow: 0 6px 16px rgba(0,0,0,.14); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); cursor: pointer;
+    transition: opacity .55s .32s var(--ease), color .18s, border-color .18s, background .18s,
+      transform .18s var(--ease), bottom .6s var(--ease); }
+  #achievements-button:hover { color: rgba(239,250,255,.9); border-color: rgba(228,241,250,.18);
+    background: rgba(5,21,34,.58); transform: translateY(-1px); }
+  #achievements-button:focus-visible, #achievements-close:focus-visible { outline: 1px solid rgba(228,241,250,.65); outline-offset: 3px; }
+  #achievements-button[aria-expanded="true"] { color: rgba(239,250,255,.94); border-color: rgba(228,241,250,.2); background: rgba(7,27,42,.66); }
+  .achievements-button-icon { width: 22px; height: 22px; flex: 0 0 auto; fill: none; stroke: rgba(243,250,255,.95); stroke-width: 1.55;
+    stroke-linecap: round; stroke-linejoin: round; transition: transform .22s var(--ease), stroke .18s; }
+  #achievements-button:hover .achievements-button-icon { stroke: #ffffff; transform: translateY(-1px); }
+  .achievements-button-label { color: currentColor; font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace;
+    letter-spacing: .11em; text-transform: uppercase; }
+  #achievements-count { min-width: 30px; margin-left: auto; padding: 4px 5px; border-radius: 6px; color: rgba(230,241,247,.68);
+    background: rgba(220,239,248,.07); font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .04em; }
+  .achievement-unseen-dot { position: absolute; top: -5px; right: -5px; width: 13px; height: 13px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 34%, #ffffff 0 30%, #e2f5ff 58%, #ade4ff 100%);
+    box-shadow: 0 0 7px rgba(207,240,255,.7), 0 0 15px rgba(168,227,255,.5);
+    opacity: 0; transform: scale(.2); transform-origin: 50% 50%; pointer-events: none;
+    transition: opacity .2s, transform .32s var(--ease); }
+  #achievements-button.has-unseen .achievement-unseen-dot { opacity: 1; transform: scale(1);
+    animation: achievement-badge-pulse 2.1s var(--ease) infinite; }
+  @keyframes achievement-badge-pulse {
+    0%, 100% { box-shadow: 0 0 7px rgba(207,240,255,.6), 0 0 13px rgba(168,227,255,.42), 0 0 0 0 rgba(168,227,255,.38); }
+    50%      { box-shadow: 0 0 8px rgba(207,240,255,.8), 0 0 16px rgba(168,227,255,.6), 0 0 0 5px rgba(168,227,255,0); } }
+  #achievements-panel { position: fixed; z-index: 18; right: 18px; left: auto; bottom: calc(62px + var(--dock-lift)); width: min(360px, calc(100vw - 36px));
+    max-height: min(610px, calc(100vh - 174px)); display: flex; flex-direction: column; overflow: hidden;
+    border-radius: 18px; color: rgba(238,249,253,.9);
+    background: rgba(3,16,27,.86); box-shadow: 0 24px 70px rgba(0,0,0,.4), inset 0 1px rgba(255,255,255,.055);
+    backdrop-filter: blur(24px) saturate(120%); -webkit-backdrop-filter: blur(24px) saturate(120%);
+    opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(12px) scale(.985);
+    transform-origin: calc(100% - 52px) 100%; transition: opacity .28s var(--ease), transform .34s var(--ease), visibility .28s; }
+  #achievements-panel[aria-hidden="false"] { opacity: 1; visibility: visible; pointer-events: auto; transform: none; }
+  .achievements-header { position: relative; flex: 0 0 auto; padding: 22px 54px 17px 22px;
+    border-bottom: 1px solid rgba(218,244,255,.1); }
+  .achievements-kicker { display: block; color: rgba(188,229,246,.48);
+    font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .25em; text-transform: uppercase; }
+  #achievements-title { margin: 7px 0 0; font: italic 400 27px/1 Georgia, "Times New Roman", serif; letter-spacing: -.02em; }
+  #achievements-summary { display: block; margin-top: 8px; color: rgba(224,242,250,.52);
+    font: 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+  #achievement-records { display: flex; gap: 18px; margin-top: 13px; padding-top: 11px; border-top: 1px solid rgba(218,244,255,.075); }
+  .achievement-record { display: grid; gap: 4px; }
+  .achievement-record small { color: rgba(188,229,246,.4); font: 700 6px/1 "SF Mono", ui-monospace, Menlo, monospace;
+    letter-spacing: .16em; text-transform: uppercase; }
+  .achievement-record strong { color: rgba(235,248,253,.76); font: 500 11px/1 "SF Mono", ui-monospace, Menlo, monospace; }
+  #achievements-close { position: absolute; top: 16px; right: 15px; width: 32px; height: 32px; padding: 0; border: 0;
+    border-radius: 50%; color: rgba(235,248,255,.52); background: transparent; cursor: pointer; transition: color .18s, background .18s, transform .18s; }
+  #achievements-close::before, #achievements-close::after { content: ""; position: absolute; left: 10px; top: 15px;
+    width: 12px; height: 1px; background: currentColor; transform: rotate(45deg); }
+  #achievements-close::after { transform: rotate(-45deg); }
+  #achievements-close:hover { color: white; background: rgba(255,255,255,.07); transform: rotate(4deg); }
+  #achievements-list { margin: 0; padding: 7px 8px 10px; overflow: auto; overscroll-behavior: contain; list-style: none; scrollbar-width: thin;
+    scrollbar-color: rgba(218,244,255,.18) transparent; }
+  .achievement-entry { --achievement-progress: 0; position: relative; display: grid; grid-template-columns: 43px minmax(0,1fr);
+    gap: 10px; min-height: 78px; padding: 13px 12px 12px 9px; border-radius: 12px; color: rgba(220,236,244,.46);
+    transition: color .22s, background .22s; }
+  .achievement-entry + .achievement-entry::before { content: ""; position: absolute; top: 0; left: 62px; right: 10px;
+    height: 1px; background: rgba(218,244,255,.07); }
+  .achievement-entry:hover { color: rgba(225,241,248,.66); background: rgba(255,255,255,.025); }
+  .achievement-entry.unlocked { color: rgba(234,247,252,.82); }
+  .achievement-entry.secret { color: rgba(213,231,239,.3); }
+  .achievement-entry.secret .achievement-mark { border-style: dashed; color: rgba(218,244,255,.22); }
+  .achievement-entry.secret .achievement-copy strong { letter-spacing: .025em; }
+  .achievement-entry.secret .achievement-copy > span { opacity: .46; }
+  .achievement-entry.secret .achievement-progress { opacity: .72; }
+  .achievement-entry.reward.unlocked { background: linear-gradient(90deg, rgba(168,227,255,.055), transparent 72%); }
+  .achievement-entry.reward.unlocked .achievement-mark { box-shadow: inset 0 0 0 3px rgba(194,233,248,.05), 0 0 22px rgba(147,217,244,.1); }
+  .achievement-mark { width: 38px; height: 38px; display: grid; place-items: center; align-self: start;
+    border: 1px solid rgba(218,244,255,.13); border-radius: 50%; color: rgba(218,244,255,.34);
+    font: 600 8px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .04em;
+    background: radial-gradient(circle, rgba(218,244,255,.025), transparent 68%); }
+  .achievement-entry.unlocked .achievement-mark { color: rgba(225,245,253,.9); border-color: rgba(194,233,248,.42);
+    box-shadow: inset 0 0 0 3px rgba(194,233,248,.035), 0 0 18px rgba(147,217,244,.06); }
+  .achievement-copy { min-width: 0; display: block; }
+  .achievement-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .achievement-copy strong { display: block; color: currentColor; font: 400 15px/1.1 Georgia, "Times New Roman", serif; }
+  .achievement-level { flex: 1 1 auto; min-width: 0; color: rgba(202,235,248,.56); font: 700 6px/1.25 "SF Mono", ui-monospace, Menlo, monospace;
+    letter-spacing: .12em; text-transform: uppercase; }
+  .achievement-copy > span { display: block; margin-top: 4px; color: currentColor; opacity: .72;
+    font: 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; }
+  .achievement-copy small { display: block; margin-top: 7px; color: currentColor; opacity: .6;
+    font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; }
+  .achievement-progress { position: relative; display: block; height: 3px; margin-top: 7px; overflow: hidden; border-radius: 999px;
+    background: rgba(218,244,255,.1); transform: translateZ(0); }
+  .achievement-progress::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: rgba(190,233,250,.72);
+    box-shadow: 0 0 7px rgba(154,222,245,.2);
+    transform: scaleX(var(--achievement-progress)); transform-origin: 0 50%; transition: transform .5s var(--ease); }
+  #achievement-toast-region { position: fixed; z-index: 24; top: 22px; left: 50%; width: min(326px, calc(100vw - 28px));
+    transform: translateX(-50%); pointer-events: none; }
+  .achievement-toast { display: grid; grid-template-columns: 40px 1fr; align-items: center; gap: 11px; min-height: 72px;
+    padding: 10px 15px 10px 9px; border: 1px solid rgba(218,244,255,.15); border-radius: 14px;
+    color: rgba(239,249,253,.92); background: rgba(3,16,27,.78); box-shadow: 0 16px 42px rgba(0,0,0,.28);
+    backdrop-filter: blur(18px) saturate(120%); -webkit-backdrop-filter: blur(18px) saturate(120%);
+    opacity: 0; transform: translateY(-10px) scale(.98); transition: opacity .32s var(--ease), transform .38s var(--ease); }
+  .achievement-toast.visible { opacity: 1; transform: none; }
+  .achievement-toast-mark { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid rgba(218,244,255,.34);
+    border-radius: 50%; font: 600 8px/1 "SF Mono", ui-monospace, Menlo, monospace; }
+  .achievement-toast small { display: block; color: rgba(202,235,248,.48);
+    font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .17em; text-transform: uppercase; }
+  .achievement-toast strong { display: block; margin-top: 4px; font: italic 400 17px/1 Georgia, "Times New Roman", serif; }
+  .achievement-toast em { display: block; margin-top: 5px; color: rgba(224,242,250,.58); font: normal 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; }
+  /* ---- nouveau bateau : callout ancré visuellement au sélecteur ---- */
+  #vessel-unlock-alert { position: fixed; z-index: 14; left: 50%; bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+    width: min(322px, calc(100vw - 28px)); min-height: 68px; display: grid; grid-template-columns: 46px minmax(0, 1fr);
+    align-items: center; gap: 13px; padding: 12px 16px 12px 12px; border: 1px solid rgba(190,233,250,.24); border-radius: 16px;
+    color: rgba(239,249,253,.9); background: linear-gradient(158deg, rgba(13,37,54,.9), rgba(4,17,29,.92));
+    box-shadow: 0 20px 46px rgba(0,0,0,.34), 0 0 34px rgba(126,205,235,.13), inset 0 1px rgba(200,239,253,.16);
+    backdrop-filter: blur(20px) saturate(126%); -webkit-backdrop-filter: blur(20px) saturate(126%); pointer-events: none;
+    opacity: 0; visibility: hidden; transform: translate(-50%, 10px) scale(.975);
+    transition: opacity .28s var(--ease), transform .42s var(--ease), visibility .28s, border-color .22s var(--ease), box-shadow .3s var(--ease); }
+  #vessel-unlock-alert::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(108deg, transparent 34%, rgba(202,240,253,.16) 49%, transparent 64%);
+    background-size: 260% 100%; background-position: 150% 0; opacity: 0; }
+  #vessel-unlock-alert.visible::before { animation: vessel-unlock-sheen 1.15s var(--ease) .16s 1; }
+  @keyframes vessel-unlock-sheen { 0% { opacity: 0; background-position: 150% 0; } 22% { opacity: 1; } 100% { opacity: 0; background-position: -70% 0; } }
+  #vessel-unlock-alert::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 12px; height: 12px;
+    border-right: 1px solid rgba(190,233,250,.24); border-bottom: 1px solid rgba(190,233,250,.24); border-bottom-right-radius: 3px;
+    background: linear-gradient(158deg, rgba(13,37,54,.9), rgba(4,17,29,.92));
+    backdrop-filter: blur(20px) saturate(126%); -webkit-backdrop-filter: blur(20px) saturate(126%);
+    transform: translateX(-50%) rotate(45deg); }
+  #vessel-unlock-alert.visible { opacity: 1; visibility: visible; transform: translate(-50%, 0) scale(1); pointer-events: auto; cursor: pointer; }
+  @media (hover: hover) { #vessel-unlock-alert.visible:hover { border-color: rgba(190,233,250,.44);
+    box-shadow: 0 22px 50px rgba(0,0,0,.36), 0 0 44px rgba(126,205,235,.24), inset 0 1px rgba(200,239,253,.22); } }
+  .vessel-unlock-icon { position: relative; width: 46px; height: 46px; display: grid; place-items: center; border: 1px solid rgba(190,233,250,.3);
+    border-radius: 50%; color: rgba(208,241,253,.92); background: radial-gradient(circle at 50% 32%, rgba(150,220,246,.2), rgba(150,220,246,.03) 72%);
+    box-shadow: inset 0 1px rgba(212,243,255,.24), 0 0 18px rgba(140,214,240,.14); }
+  #vessel-unlock-alert.visible .vessel-unlock-icon { animation: vessel-unlock-pop .5s var(--ease) .1s 1 backwards; }
+  @keyframes vessel-unlock-pop { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.08); } 100% { transform: scale(1); opacity: 1; } }
+  .vessel-unlock-icon svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.25;
+    stroke-linecap: round; stroke-linejoin: round; }
+  .vessel-unlock-copy { min-width: 0; }
+  .vessel-unlock-copy small { display: block; color: rgba(151,214,242,.74); font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace;
+    letter-spacing: .17em; text-transform: uppercase; }
+  #vessel-unlock-name { display: block; margin-top: 5px; overflow: hidden; color: rgba(244,252,255,.96); text-overflow: ellipsis;
+    white-space: nowrap; font: italic 400 17px/1 Georgia, "Times New Roman", serif; text-shadow: 0 1px 10px rgba(120,200,232,.18); }
+  .vessel-unlock-copy em { display: block; margin-top: 5px; color: rgba(220,239,247,.5); font: normal 7px/1.2 "SF Mono", ui-monospace, Menlo, monospace; }
+  #vessel-selector.new-vessel { animation: vessel-selector-beacon 1.1s ease-out 2; }
+  @keyframes vessel-selector-beacon { 45% { box-shadow: 0 -13px 44px rgba(91,193,226,.2), inset 0 1px rgba(193,235,250,.1); } }
+  /* ---- sélecteur de flotte : une ligne d'horizon sur toute la largeur ---- */
+  #vessel-selector { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; height: 76px;
+    display: grid; grid-template-columns: minmax(64px, 9vw) 1fr minmax(64px, 9vw); align-items: stretch;
+    border: 0; background: rgba(6,22,36,.46);
+    box-shadow: 0 -12px 40px rgba(0,0,0,.2); backdrop-filter: blur(20px) saturate(135%);
+    -webkit-backdrop-filter: blur(20px) saturate(135%); user-select: none; -webkit-user-select: none;
+    touch-action: none; isolation: isolate; transform: translateY(var(--dock-slide)); }
+  #vessel-selector::before { content: ""; position: absolute; z-index: -1; inset: 0;
+    background: linear-gradient(90deg, rgba(168,227,255,.05), transparent 30%, transparent 70%, rgba(168,227,255,.05)); }
+  .vessel-arrow { display: grid; place-items: center; padding: 0; border: 0; color: rgba(255,255,255,.82);
+    background: transparent; cursor: pointer; transition: color .18s, background .18s; }
+  .vessel-arrow svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.45;
+    stroke-linecap: round; stroke-linejoin: round; transition: transform .22s var(--ease); }
+  .vessel-arrow:hover { color: white; background: rgba(168,227,255,.08); }
+  #prev-boat:hover svg { transform: translateX(-4px); }
+  #next-boat:hover svg { transform: translateX(4px); }
+  .vessel-arrow:active svg { transform: scale(.82); }
+  .vessel-arrow:disabled { opacity: .32; cursor: default; }
+  #vessel-selector.single-vessel .vessel-arrow { visibility: hidden; pointer-events: none; }
+  #vessel-selector.single-vessel .vessel-current { cursor: default; }
+  .vessel-current { position: relative; min-width: 0; display: grid; place-content: center; justify-items: center;
+    padding: 8px 20px; text-align: center; cursor: grab; overflow: hidden; }
+  .vessel-current::before, .vessel-current::after { content: ""; position: absolute; top: 50%; width: clamp(22px, 8vw, 120px);
+    height: 1px; background: linear-gradient(90deg, transparent, rgba(168,227,255,.32)); }
+  .vessel-current::before { right: calc(50% + min(190px, 24vw)); }
+  .vessel-current::after { left: calc(50% + min(190px, 24vw)); transform: scaleX(-1); }
+  .vessel-eyebrow { font: 700 8px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .24em;
+    text-transform: uppercase; color: rgba(191,231,249,.56); }
+  #boatname { display: block; max-width: min(520px, 64vw); margin-top: 4px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-family: Georgia, serif; font-size: 20px; line-height: 1.1; font-style: italic; letter-spacing: .015em;
+    text-shadow: 0 2px 12px rgba(0,0,0,.38); transition: opacity .16s, transform .28s var(--ease); }
+  #boat-position { margin-top: 5px; font: 9px/1 "SF Mono", ui-monospace, Menlo, monospace;
+    letter-spacing: .18em; color: rgba(255,255,255,.42); }
+  #vessel-selector.changing-next #boatname { animation: vessel-from-right .34s var(--ease); }
+  #vessel-selector.changing-prev #boatname { animation: vessel-from-left .34s var(--ease); }
+  @keyframes vessel-from-right { from { opacity: 0; transform: translateX(22px); } }
+  @keyframes vessel-from-left { from { opacity: 0; transform: translateX(-22px); } }
+  /* ---- accueil : une invitation nautique, révélée une fois la scène prête ---- */
+  #welcome { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 28px;
+    overflow: hidden; isolation: isolate; text-align: center;
+    background: linear-gradient(180deg, rgba(2,12,21,.46), rgba(2,14,24,.18) 44%, rgba(2,13,23,.7));
+    transition: opacity .75s var(--ease), visibility .75s; }
+  #welcome::before { content: ""; position: absolute; z-index: -2; inset: 0;
+    background: radial-gradient(circle at 50% 29%, rgba(215,241,250,.2), transparent 23%),
+      linear-gradient(110deg, transparent 30%, rgba(177,225,242,.08) 50%, transparent 68%); }
+  #welcome::after { content: ""; position: absolute; z-index: -1; inset: 0; opacity: .23; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E");
+    mix-blend-mode: soft-light; }
+  body.started #welcome { opacity: 0; visibility: hidden; pointer-events: none; }
+  .welcome-cta { position: relative; display: inline-flex; }
+  /* le trait est ancré au centre du bouton (pleine largeur, derrière), donc aligné à toutes les tailles de fenêtre */
+  .welcome-horizon { position: absolute; z-index: -1; top: 50%; left: 50%; width: 100vw; height: 1px;
+    transform: translate(-50%, -50%); pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(200,237,250,.5) 24%, rgba(255,255,255,.72) 50%, rgba(200,237,250,.5) 76%, transparent);
+    box-shadow: 0 0 22px rgba(151,220,246,.28); }
+  .welcome-card { width: min(620px, 100%); transform: translateY(-2vh); }
+  .welcome-kicker { display: flex; align-items: center; justify-content: center; gap: 13px;
+    font: 700 9px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .28em;
+    text-transform: uppercase; color: rgba(220,245,255,.68); animation: welcome-rise .8s .08s both var(--ease); }
+  .welcome-kicker span { width: 30px; height: 1px; background: rgba(190,231,247,.48); }
+  .welcome-emblem { display: block; width: 92px; margin: 28px auto 14px; fill: none; stroke: var(--ice);
+    stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round;
+    filter: drop-shadow(0 0 14px rgba(127,215,250,.25)); animation: welcome-float 4.2s ease-in-out infinite; }
+  .welcome-mast { stroke: rgba(255,255,255,.72); }
+  #welcome h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(52px, 8vw, 92px);
+    font-weight: 400; line-height: .88; letter-spacing: -.065em; text-shadow: 0 8px 32px rgba(0,0,0,.32);
+    animation: welcome-rise .9s .15s both var(--ease); }
+  #welcome h1 i { color: var(--ice); font-weight: 400; }
+  #welcome p { max-width: 480px; margin: 24px auto 30px; font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(15px, 2vw, 18px); line-height: 1.55; font-style: italic; color: rgba(237,248,252,.72);
+    animation: welcome-rise .9s .23s both var(--ease); }
+  #start-experience { min-width: 230px; height: 58px; display: inline-flex; align-items: center; justify-content: center;
+    gap: 22px; padding: 0 23px 0 27px; border: 1px solid rgba(199,237,251,.5); border-radius: 2px;
+    color: #061620; background: rgba(214,243,253,.94); box-shadow: 0 14px 50px rgba(0,0,0,.24), 0 0 36px rgba(137,220,250,.12);
+    font: 700 10px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase;
+    cursor: pointer; transition: transform .22s var(--ease), background .22s, box-shadow .22s;
+    animation: welcome-rise .9s .31s both var(--ease); }
+  #start-experience svg { width: 27px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round;
+    stroke-linejoin: round; transition: transform .22s var(--ease); }
+  #start-experience:hover { transform: translateY(-3px); background: white;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3), 0 0 42px rgba(137,220,250,.2); }
+  #start-experience:hover svg { transform: translateX(4px); }
+  #start-experience:active { transform: translateY(0) scale(.98); }
+  #start-experience:focus-visible { outline: 2px solid white; outline-offset: 5px; }
+  .welcome-note { display: flex; justify-content: center; align-items: center; gap: 9px; margin-top: 18px;
+    font: 8px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .14em; text-transform: uppercase;
+    color: rgba(225,245,252,.45); animation: welcome-rise .9s .39s both var(--ease); }
+  .welcome-sound { height: 10px; display: flex; align-items: end; gap: 2px; }
+  .welcome-sound i { display: block; width: 1px; height: 5px; background: currentColor; animation: sound-wave 1.1s ease-in-out infinite alternate; }
+  .welcome-sound i:nth-child(2) { height: 10px; animation-delay: -.7s; }
+  .welcome-sound i:nth-child(3) { height: 7px; animation-delay: -.35s; }
+  .welcome-source { width: max-content; display: inline-flex; align-items: center; gap: 7px; margin: 15px auto 0;
+    padding: 3px 1px; color: rgba(225,245,252,.38); text-decoration: none;
+    font: 600 8px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em;
+    animation: welcome-rise .9s .47s both var(--ease);
+    transition: color .2s, transform .2s var(--ease); }
+  .welcome-source-code { color: rgba(168,224,247,.62); font-size: 9px; letter-spacing: -.08em; }
+  .welcome-source-arrow { font-style: normal; opacity: .56; transition: transform .2s var(--ease); }
+  .welcome-source:hover { color: rgba(240,250,254,.78); transform: translateY(-1px); }
+  .welcome-source:hover .welcome-source-arrow { transform: translate(2px, -2px); }
+  .welcome-source:focus-visible { border-radius: 3px; outline: 1px solid rgba(225,245,252,.74); outline-offset: 4px; }
+  body.awaiting-start > canvas { filter: saturate(.72) brightness(.72); transform: scale(1.015); }
+  body > canvas { transition: filter .9s var(--ease), transform 1.2s var(--ease); }
+  body.awaiting-start #hud, body.awaiting-start #controls, body.awaiting-start #vessel-selector,
+  body.awaiting-start #help, body.awaiting-start #drive, body.awaiting-start #quality-control,
+  body.awaiting-start #achievements-button, body.awaiting-start #achievements-panel,
+  body.awaiting-start #achievement-toast-region { opacity: 0; pointer-events: none; }
+  #hud, #controls, #vessel-selector, #help, #drive { transition: opacity .55s .32s var(--ease); }
+  /* le sélecteur remonte du bas quelques secondes après le départ (body.dock-revealed) */
+  #vessel-selector { transition: opacity .55s .32s var(--ease), transform .6s var(--ease); }
+  /* l'intensité des vagues glisse depuis la droite, plus tard et plus lentement (body.controls-revealed) */
+  #controls { transition: opacity .55s .32s var(--ease), transform .9s var(--ease); }
+  /* l'aide clavier s'efface en douceur ~20 s après le départ, puis ne revient plus de la session */
+  #help.help-dismissed { opacity: 0; transition: opacity 1s var(--ease); }
+  @keyframes welcome-rise { from { opacity: 0; transform: translateY(16px); } }
+  @keyframes welcome-float { 50% { transform: translateY(-6px) rotate(-1deg); } }
+  @keyframes sound-wave { to { transform: scaleY(.42); opacity: .55; } }
+  /* ---- premier départ : invitation cinématique à explorer, révélée au centre
+     ligne par ligne puis effacée (cf. playVoyageIntro dans main.js). N'intercepte
+     aucun clic. En tactile, décalée vers le haut (cf. media query) pour laisser le
+     centre au tutoriel de conduite #drive-tutorial. ---- */
+  #voyage-intro { position: fixed; z-index: 12; inset: 0; display: grid; place-items: center;
+    padding: 30px; text-align: center; pointer-events: none; opacity: 0;
+    transition: opacity 1.3s var(--ease); }
+  #voyage-intro[hidden] { display: none; }
+  /* halo sombre discret qui concentre le regard et garde le texte lisible sur ciel/mer clairs */
+  #voyage-intro::before { content: ""; position: absolute; z-index: -1; inset: 0; opacity: 0;
+    background: radial-gradient(ellipse 60% 46% at 50% 45%, rgba(2,12,21,.6), transparent 72%);
+    transition: opacity 1.3s var(--ease); }
+  #voyage-intro.playing, #voyage-intro.playing::before { opacity: 1; }
+  .voyage-intro-inner { width: min(680px, 100%); transform: translateY(-3vh); }
+  .voyage-intro-kicker { display: flex; align-items: center; justify-content: center; gap: 13px;
+    font: 700 9px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .3em;
+    text-transform: uppercase; color: rgba(224,246,255,.72); }
+  .voyage-intro-kicker span { width: 34px; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(190,231,247,.6)); }
+  .voyage-intro-kicker span:last-child { transform: scaleX(-1); }
+  .voyage-intro-lead { margin: 20px 0 0; font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(38px, 6vw, 74px); font-weight: 400; font-style: italic; line-height: .96;
+    letter-spacing: -.02em; color: rgba(247,252,255,.97);
+    text-shadow: 0 4px 30px rgba(0,0,0,.55), 0 0 46px rgba(93,180,224,.22); }
+  .voyage-intro-sub { max-width: 500px; margin: 20px auto 0; font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(15px, 2vw, 19px); font-style: italic; line-height: 1.5; color: rgba(233,246,252,.82);
+    text-shadow: 0 2px 16px rgba(0,0,0,.5); }
+  /* révélation progressive : chaque ligne monte et se dé-floute, en cascade */
+  #voyage-intro.playing .voyage-intro-kicker { animation: voyage-reveal 1.1s .15s both var(--ease); }
+  #voyage-intro.playing .voyage-intro-lead { animation: voyage-reveal 1.25s .42s both var(--ease); }
+  #voyage-intro.playing .voyage-intro-sub { animation: voyage-reveal 1.25s .78s both var(--ease); }
+  #voyage-intro.leaving .voyage-intro-inner { transform: translateY(-4.6vh); transition: transform 1.5s var(--ease); }
+  @keyframes voyage-reveal { from { opacity: 0; transform: translateY(16px); filter: blur(7px); }
+    to { opacity: 1; transform: none; filter: blur(0); } }
+  /* ---- première traversée : une carte de navigation sobre, plus proche d'un
+     journal de bord que d'un tutoriel de jeu. Elle accompagne uniquement le
+     premier demi-mille et s'efface dès que l'océan libre est compris. ---- */
+  #first-voyage-guide { position: fixed; z-index: 13; top: 18px; left: 50%;
+    width: min(420px, calc(100vw - 220px)); padding: 13px 46px 12px 16px; overflow: hidden;
+    border: 1px solid rgba(211,240,251,.14); border-radius: 14px; color: rgba(241,250,253,.92);
+    background: linear-gradient(105deg, rgba(3,17,28,.72), rgba(6,27,41,.56));
+    box-shadow: 0 14px 38px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.055);
+    backdrop-filter: blur(17px) saturate(120%); -webkit-backdrop-filter: blur(17px) saturate(120%);
+    opacity: 0; visibility: hidden; transform: translate(-50%, -10px);
+    transition: opacity .5s var(--ease), transform .55s var(--ease), visibility .5s, top .45s var(--ease); }
+  #first-voyage-guide[hidden] { display: none; }
+  #first-voyage-guide.visible { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+  #first-voyage-guide.stage-complete { border-color: rgba(180,231,251,.27);
+    box-shadow: 0 16px 46px rgba(0,0,0,.24), 0 0 36px rgba(116,202,238,.09), inset 0 1px rgba(255,255,255,.08); }
+  #first-voyage-guide.waypoint-reached { border-color: rgba(204,243,255,.38);
+    box-shadow: 0 16px 46px rgba(0,0,0,.22), 0 0 0 1px rgba(168,227,255,.08),
+      0 0 38px rgba(116,202,238,.14), inset 0 1px rgba(255,255,255,.1); }
+  body:has(.achievement-toast.visible) #first-voyage-guide { top: 104px; }
+  .first-voyage-heading { min-width: 0; }
+  #first-voyage-kicker { display: block; color: rgba(168,227,255,.62);
+    font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .22em; text-transform: uppercase; }
+  #first-voyage-title { display: block; margin-top: 5px; overflow: hidden; text-overflow: ellipsis;
+    font: italic 400 19px/1.08 Georgia, "Times New Roman", serif; white-space: nowrap; }
+  #first-voyage-copy { display: block; margin-top: 6px; color: rgba(226,243,250,.62);
+    font: 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .035em; }
+  #first-voyage-skip { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; padding: 0;
+    border: 0; border-radius: 50%; color: rgba(224,242,250,.4); background: transparent; cursor: pointer;
+    font: 17px/1 Georgia, serif; transition: color .18s, background .18s, transform .18s var(--ease); }
+  #first-voyage-skip:hover { color: rgba(245,252,255,.9); background: rgba(255,255,255,.07); transform: scale(1.06); }
+  #first-voyage-skip:focus-visible { outline: 1px solid rgba(200,238,252,.7); outline-offset: 2px; }
+  .first-voyage-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 11px; }
+  .first-voyage-step { position: relative; height: 2px; overflow: hidden; border-radius: 999px;
+    background: rgba(218,244,255,.12); }
+  .first-voyage-step::after { content: ""; position: absolute; inset: 0; border-radius: inherit;
+    background: rgba(183,231,250,.72); transform: scaleX(0); transform-origin: 0 50%; transition: transform .55s var(--ease); }
+  .first-voyage-step.done::after, .first-voyage-step.active::after { transform: scaleX(1); }
+  .first-voyage-step.active::after { animation: first-voyage-breathe 1.8s ease-in-out infinite; }
+  @keyframes first-voyage-breathe { 50% { opacity: .45; } }
+  .loader { position: fixed; z-index: 20; transition: opacity .55s var(--ease), visibility .55s; }
+  .loader.done { opacity: 0; visibility: hidden; pointer-events: none; }
+  #loading { z-index: 40; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 42%, #15354a, #06121f 58%); }
+  .loader-mark { text-align: center; }
+  .loader-mark svg { width: 78px; stroke: var(--ice); fill: none; stroke-width: 1.4; stroke-linecap: round; animation: float 1.8s ease-in-out infinite; }
+  .loader-title { margin-top: 16px; font-family: Georgia, serif; font-size: 22px; font-style: italic; }
+  .loader-copy { margin-top: 6px; font: 9px/1 "SF Mono", monospace; letter-spacing: .22em; text-transform: uppercase; opacity: .55; }
+  #boat-loading { inset: 0; display: grid; place-items: center; background: rgba(3,13,22,.36); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); opacity: 0; visibility: hidden; pointer-events: none; }
+  #boat-loading.visible { opacity: 1; visibility: visible; pointer-events: auto; }
+  #boat-loading .loader-mark { min-width: 220px; padding: 22px 28px; border-radius: 18px; }
+  #boat-loading .loader-title { font-size: 18px; margin-top: 9px; }
+  .wake { stroke-dasharray: 24 10; animation: wake 1.1s linear infinite; }
+  @keyframes float { 50% { transform: translateY(-5px) rotate(-1deg); } }
+  @keyframes wake { to { stroke-dashoffset: -34; } }
+  /* ---- pilotage gestuel : le pouce devient le manche gaz + direction ---- */
+  #drive { position: fixed; z-index: 9; left: 0; right: 0; bottom: 76px;
+    height: 176px; display: none; place-items: end center; padding-bottom: 16px;
+    pointer-events: none; user-select: none; -webkit-user-select: none; }
+  body.touch #drive { display: grid; }
+  body.touch #help { display: none; }              /* les raccourcis clavier n'ont pas de sens */
+  #gesture-drive { position: relative; width: 94px; height: 94px; padding: 0; border: 0;
+    border-radius: 50%; color: white; background: transparent; pointer-events: auto;
+    touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; }
+  #gesture-drive:focus-visible { outline: 2px solid var(--ice); outline-offset: 7px; }
+  #gesture-drive::before, #gesture-drive::after { content: ""; position: absolute; border-radius: 50%;
+    transition: opacity .2s var(--ease), transform .3s var(--ease); }
+  #gesture-drive::before { inset: 8px; border: 1px solid rgba(218,244,255,.42);
+    background: rgba(168,227,255,.018);
+    box-shadow: 0 3px 14px rgba(0,0,0,.13), inset 0 1px rgba(255,255,255,.08);
+    backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+  #gesture-drive::after { inset: 22px; border: 1px solid rgba(218,244,255,.18);
+    background: radial-gradient(circle, rgba(218,244,255,.66) 0 1.5px,
+      rgba(168,227,255,.055) 2px, rgba(5,20,32,.1) 100%);
+    box-shadow: inset 0 1px rgba(255,255,255,.06);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .drive-ticks { position: absolute; z-index: 1; inset: 0; opacity: .38;
+    background: linear-gradient(rgba(218,244,255,.86),rgba(218,244,255,.86)) 50% 10px/1px 6px no-repeat,
+      linear-gradient(rgba(218,244,255,.86),rgba(218,244,255,.86)) 50% calc(100% - 10px)/1px 6px no-repeat,
+      linear-gradient(90deg,rgba(218,244,255,.86),rgba(218,244,255,.86)) 10px 50%/6px 1px no-repeat,
+      linear-gradient(90deg,rgba(218,244,255,.86),rgba(218,244,255,.86)) calc(100% - 10px) 50%/6px 1px no-repeat;
+    transition: opacity .16s, transform .25s var(--ease); }
+  .drive-arrow { position: absolute; z-index: 2; left: 50%; top: -59px; width: 36px; height: 52px;
+    color: rgba(218,244,255,.96); pointer-events: none;
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,.52)) drop-shadow(0 0 8px rgba(119,213,255,.32));
+    animation: arrow-cue 1.35s var(--ease) infinite; }
+  .drive-arrow svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor;
+    stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+  .drive-label { position: absolute; z-index: 2; left: 50%; bottom: 158px; transform: translateX(-50%);
+    width: max-content; font: 700 10px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .18em;
+    text-transform: uppercase; color: rgba(230,248,255,.88); text-shadow: 0 2px 7px rgba(0,0,0,.7);
+    animation: cue-breathe 2.2s ease-in-out infinite; }
+  .drive-vector { position: fixed; z-index: 12; left: 0; top: 0; width: 1px; height: 1px;
+    opacity: 0; pointer-events: none; transform: translate3d(var(--drive-x, 0), var(--drive-y, 0), 0); }
+  .drive-vector::before { content: ""; position: absolute; left: -1px; bottom: 0; width: 2px;
+    height: var(--drive-length, 0px); transform-origin: 50% 100%; transform: rotate(var(--drive-angle, 0deg));
+    border-radius: 2px; background: linear-gradient(to top, rgba(168,227,255,.12), rgba(168,227,255,.82)); }
+  .drive-vector::after { content: ""; position: absolute; left: -14px; top: -14px; width: 28px; height: 28px;
+    border-radius: 50%; border: 1px solid rgba(202,240,255,.84); background: rgba(9,37,51,.48);
+    box-shadow: 0 0 0 6px rgba(168,227,255,.08), 0 0 18px rgba(119,213,255,.24);
+    transform: translate3d(var(--drive-end-x, 0), var(--drive-end-y, 0), 0); }
+  #gesture-drive.active { cursor: grabbing; }
+  #gesture-drive.active::before, #gesture-drive.active::after, #gesture-drive.active .drive-ticks,
+  #gesture-drive.active .drive-arrow, #gesture-drive.active .drive-label,
+  #gesture-drive.awaiting-drive-idle .drive-arrow,
+  #gesture-drive.awaiting-drive-idle .drive-label {
+    opacity: 0; transform: scale(.74); animation: none; }
+  #gesture-drive.active .drive-vector { opacity: 1; }
+  #drive-tutorial { position: fixed; z-index: 14; left: 50%; top: 43%; width: min(410px, calc(100vw - 28px));
+    padding: 18px; border: 1px solid rgba(218,244,255,.14); border-radius: 24px; opacity: 0; visibility: hidden;
+    transform: translate(-50%, calc(-50% + 16px)) scale(.96);
+    transition: opacity .4s var(--ease), transform .4s var(--ease), visibility .4s;
+    pointer-events: none; text-align: center; background: rgba(3,18,30,.86);
+    box-shadow: 0 24px 70px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.07);
+    backdrop-filter: blur(22px) saturate(125%); -webkit-backdrop-filter: blur(22px) saturate(125%); }
+  #drive-tutorial.visible { opacity: 1; visibility: visible; transform: translate(-50%, -50%) scale(1); }
+  .tutorial-kicker { color: rgba(168,227,255,.7); font: 700 8px/1 "SF Mono", ui-monospace, monospace;
+    letter-spacing: .2em; text-transform: uppercase; }
+  .tutorial-title { margin-top: 7px; font-family: Georgia, serif; font-size: 25px; line-height: 1.05; font-style: italic; }
+  .tutorial-intro { max-width: 310px; margin: 9px auto 0; color: rgba(232,247,253,.72);
+    font: 11px/1.45 "SF Mono", ui-monospace, monospace; }
+  .tutorial-intro strong { color: white; font-weight: 700; }
+  .tutorial-map { display: grid; grid-template: 42px 72px 42px / minmax(64px,1fr) 72px minmax(64px,1fr);
+    align-items: center; justify-items: center; margin: 10px auto 8px; }
+  .tutorial-direction { display: flex; align-items: center; justify-content: center; gap: 6px;
+    color: rgba(224,244,252,.68); font-family: "SF Mono", ui-monospace, monospace; text-transform: uppercase; }
+  .tutorial-direction strong { display: block; color: var(--ice); font-size: 10px; line-height: 1.1; letter-spacing: .08em; }
+  .tutorial-direction small { display: block; margin-top: 3px; color: rgba(224,244,252,.46);
+    font-size: 7px; line-height: 1; letter-spacing: .09em; }
+  .tutorial-direction .tutorial-arrow { color: rgba(218,244,255,.86); font: 300 19px/1 Georgia, serif; }
+  .tutorial-forward { grid-area: 1 / 2; flex-direction: column; gap: 2px; }
+  .tutorial-left { grid-area: 2 / 1; }
+  .tutorial-right { grid-area: 2 / 3; flex-direction: row-reverse; }
+  .tutorial-reverse { grid-area: 3 / 2; flex-direction: column-reverse; gap: 2px; }
+  .tutorial-compass { position: relative; grid-area: 2 / 2; width: 68px; height: 68px;
+    display: grid; place-items: center; border: 1px solid rgba(168,227,255,.35); border-radius: 50%;
+    background: radial-gradient(circle, rgba(168,227,255,.09), rgba(168,227,255,.018) 62%, transparent 63%);
+    box-shadow: inset 0 0 20px rgba(119,213,255,.05); }
+  .tutorial-compass::before, .tutorial-compass::after { content: ""; position: absolute; background: rgba(168,227,255,.16); }
+  .tutorial-compass::before { left: 50%; top: 7px; bottom: 7px; width: 1px; }
+  .tutorial-compass::after { top: 50%; left: 7px; right: 7px; height: 1px; }
+  .tutorial-origin { position: relative; z-index: 1; width: 30px; height: 30px; display: grid; place-items: center;
+    border: 1px solid rgba(218,244,255,.42); border-radius: 50%; color: rgba(230,248,255,.82);
+    background: rgba(5,24,37,.8); box-shadow: 0 0 0 5px rgba(168,227,255,.045);
+    font: 700 6px/1 "SF Mono", ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+  .tutorial-release { display: flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 8px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px;
+    color: rgba(232,247,253,.62); background: rgba(255,255,255,.035);
+    font: 9px/1.35 "SF Mono", ui-monospace, monospace; }
+  .tutorial-release strong { color: white; font-size: 10px; }
+  .tutorial-release-icon { width: 18px; height: 18px; border: 1px solid rgba(168,227,255,.5);
+    border-radius: 50%; box-shadow: 0 0 0 4px rgba(168,227,255,.05); }
+  .tutorial-camera { display: flex; align-items: center; gap: 10px; margin-top: 10px; text-align: left;
+    color: rgba(255,255,255,.52); font: 8px/1.4 "SF Mono", ui-monospace, monospace; }
+  .tutorial-camera-badge { flex: 0 0 auto; padding: 5px 7px; border-radius: 7px; color: rgba(218,244,255,.8);
+    background: rgba(168,227,255,.08); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  @keyframes arrow-cue { 0%, 100% { transform: translate(-50%, -5px); opacity: .5; }
+    55% { transform: translate(-50%, 7px); opacity: 1; } }
+  @keyframes cue-breathe { 50% { opacity: .55; } }
+  /* ---- panneaux du haut resserrés sur tactile ---- */
+  /* intensité des vagues : garde uniquement les 4 icônes */
+  body.touch #wave-control { padding: 0; border: 0; background: transparent; box-shadow: none;
+    backdrop-filter: none; -webkit-backdrop-filter: none; }
+  body.touch #wave-control .control-title { display: none; }
+  body.touch .wave-options { gap: 6px; }
+  body.touch .wave-option { width: 46px; height: 46px; padding: 0; border-radius: 50%;
+    color: rgba(255,255,255,.72); background: var(--control-bg);
+    box-shadow: var(--control-shadow); backdrop-filter: blur(14px) saturate(120%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%); }
+  body.touch .wave-option.active { color: var(--ice); background: var(--control-active); }
+  body.touch .wave-option span { display: none; }
+  body.touch .wave-option svg { width: 24px; height: 17px; margin: 0 auto; }
+  body.touch #sea-trial-prompt { width: 202px; }
+  body.touch.sea-trial-visible #sea-trial-prompt { max-height: 96px; margin-top: 8px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  @media (max-width: 720px) {
+    #welcome { padding: 20px; }
+    .welcome-card { transform: translateY(-4vh); }
+    .welcome-emblem { width: 76px; margin: 22px auto 12px; }
+    #welcome p { max-width: 330px; margin-block: 20px 26px; }
+    #start-experience { min-width: min(240px, 82vw); }
+    #hud { top: 12px; left: 12px; } #hud .speed { font-size: 28px; } .bar { width: 116px; }
+    #controls { top: 12px; right: 12px; gap: 7px; }
+    #wave-control { padding: 9px; }
+    .wave-option { width: 44px; height: 44px; } /* cible tactile confortable */
+    #help { display: none; }
+    /* invitation décalée vers le haut : le tutoriel de conduite occupe le centre en tactile */
+    #voyage-intro { padding: 22px; place-items: start center; }
+    .voyage-intro-inner { width: min(440px, 100%); margin-top: 15vh; transform: none; }
+    .voyage-intro-lead { font-size: clamp(30px, 9vw, 44px); }
+    .voyage-intro-sub { max-width: 330px; font-size: clamp(13.5px, 4vw, 16px); }
+    #first-voyage-guide { top: 72px; width: calc(100vw - 24px); padding: 11px 42px 10px 13px; }
+    body:has(.achievement-toast.visible) #first-voyage-guide { top: 154px; }
+    #first-voyage-title { font-size: 17px; }
+    #first-voyage-copy { max-width: calc(100vw - 90px); }
+    body.dock-revealed { --dock-lift: 72px; }
+    #quality-control { left: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--dock-lift)); height: 34px;
+      min-width: 84px; padding-left: 7px; gap: 6px; background: rgba(3,17,28,.48); }
+    /* identique au desktop : pilule complète avec texte, ancrée en bas à droite */
+    #achievements-button { right: 12px; left: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--dock-lift)); }
+    #achievements-panel { right: 12px; left: auto; bottom: calc(56px + env(safe-area-inset-bottom, 0px) + var(--dock-lift));
+      width: calc(100vw - 24px); max-height: calc(100vh - 152px - env(safe-area-inset-bottom, 0px)); }
+    #achievement-toast-region { top: 74px; }
+    .quality-gauge { width: 20px; height: 20px; }
+    .quality-readout { min-width: 34px; }
+    #vessel-selector { height: calc(72px + env(safe-area-inset-bottom, 0px));
+      grid-template-columns: 58px minmax(0, 1fr) 58px; padding-bottom: env(safe-area-inset-bottom, 0px); }
+    #drive { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+    .vessel-current { padding-inline: 8px; }
+    .vessel-current::before, .vessel-current::after, #boat-position { display: none; }
+    .vessel-eyebrow { font-size: 7px; letter-spacing: .2em; }
+    #boatname { max-width: calc(100vw - 132px); margin-top: 5px; font-size: 17px; }
+    .vessel-arrow svg { width: 23px; height: 23px; }
+  }
+</style>
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}</script>
+</head>
+<body class="awaiting-start">
+<section id="welcome" aria-labelledby="welcome-title">
+  <div class="welcome-card">
+    <div class="welcome-kicker"><span></span> Real-time 3D simulation <span></span></div>
+    <svg class="welcome-emblem" viewBox="0 0 116 72" aria-hidden="true">
+      <path d="M35 29h49L73 45H45z"/>
+      <path d="M18 53c12-7 20 7 32 0s20 7 32 0 20 7 28 1"/>
+      <path class="welcome-mast" d="M56 29V13l14 16"/>
+    </svg>
+    <h1 id="welcome-title">Open <i>Water</i></h1>
+    <p>Take the helm and explore an open sea shaped by wind, weather and wildlife.</p>
+    <span class="welcome-cta">
+      <span class="welcome-horizon" aria-hidden="true"></span>
+      <button id="start-experience" type="button">
+        <span>Start the voyage</span>
+        <svg viewBox="0 0 28 18" aria-hidden="true"><path d="M2 9h22M18 3l6 6-6 6"/></svg>
+      </button>
+    </span>
+    <div class="welcome-note">
+      <span class="welcome-sound" aria-hidden="true"><i></i><i></i><i></i></span>
+      Sound on · Best experienced with headphones
+    </div>
+    <a class="welcome-source" href="https://github.com/bob6664569/open-water"
+       target="_blank" rel="noopener noreferrer"
+       aria-label="View the Open Water source code on GitHub">
+      <span class="welcome-source-code" aria-hidden="true">&lt;/&gt;</span>
+      <span>Source code available on GitHub</span>
+      <i class="welcome-source-arrow" aria-hidden="true">↗</i>
+    </a>
+  </div>
+</section>
+<!-- Premier départ : une invitation cinématique révélée au centre, puis effacée.
+     N'intercepte aucun clic (pointer-events:none). Jouée par playVoyageIntro(). -->
+<div id="voyage-intro" aria-hidden="true" hidden>
+  <div class="voyage-intro-inner">
+    <span class="voyage-intro-kicker"><span></span> Your voyage begins <span></span></span>
+    <p class="voyage-intro-lead">The open sea is yours</p>
+    <p class="voyage-intro-sub">Set your own course and explore. Seek out the fish and wildlife drifting beneath the surface, and see what the horizon is hiding.</p>
+  </div>
+</div>
+<aside id="first-voyage-guide" aria-label="First voyage guidance" aria-live="polite" aria-hidden="true" hidden>
+  <div class="first-voyage-heading">
+    <span id="first-voyage-kicker">First crossing</span>
+    <strong id="first-voyage-title">Take the helm</strong>
+    <span id="first-voyage-copy">Push the throttle and make way.</span>
+  </div>
+  <button id="first-voyage-skip" type="button" aria-label="Skip first voyage guidance" title="Skip guidance">×</button>
+  <div class="first-voyage-steps" aria-hidden="true">
+    <i class="first-voyage-step active"></i><i class="first-voyage-step"></i>
+    <i class="first-voyage-step"></i><i class="first-voyage-step"></i>
+  </div>
+</aside>
+<div id="loading" class="loader" role="status" aria-live="polite"><div class="loader-mark">
+  <svg viewBox="0 0 90 48" aria-hidden="true"><path d="M22 22h45l-9 13H32z"/><path class="wake" d="M6 40c10-5 17 5 27 0s17 5 27 0 17 5 25 0"/></svg>
+  <div class="loader-title">Preparing the open water</div><div class="loader-copy">Loading simulation</div>
+</div></div>
+<div id="boat-loading" class="loader" role="status" aria-live="polite"><div class="loader-mark glass">
+  <svg viewBox="0 0 90 48" aria-hidden="true"><path d="M22 22h45l-9 13H32z"/><path class="wake" d="M6 40c10-5 17 5 27 0s17 5 27 0 17 5 25 0"/></svg>
+  <div class="loader-title">Bringing your vessel alongside</div><div class="loader-copy">Changing boat</div>
+</div></div>
+<div id="hud">
+  <div class="speed"><span id="kn">0.0</span> <small>KN</small></div><div class="metric-label">Speed</div>
+  <div class="bar" id="throttle"><i></i></div><div class="metric-label">Throttle</div>
+  <div class="bar" id="rudder"><i></i></div><div class="metric-label">Rudder</div>
+</div>
+<aside id="controls" aria-label="Simulation controls">
+  <div id="wave-control" class="glass"><span class="control-title">Wave intensity</span><div class="wave-options" role="group" aria-label="Wave intensity">
+    <button class="wave-option" type="button" data-wave="1" aria-label="Calm waves" title="Calm · 0.35 m"><svg viewBox="0 0 28 18"><path d="M2 12c4-4 7 4 11 0s7 4 13 0"/></svg><span>Calm</span></button>
+    <button class="wave-option active" type="button" data-wave="2" aria-label="Rolling waves" title="Rolling · 0.9 m"><svg viewBox="0 0 28 18"><path d="M1 13c4-7 7 5 12-1s8 6 14-1"/><path d="M4 7c3-3 5 2 8 0"/></svg><span>Roll</span></button>
+    <button class="wave-option" type="button" data-wave="3" aria-label="Rough waves" title="Rough · 2.4 m"><svg viewBox="0 0 28 18"><path d="M1 14C5 2 9 17 14 7s8 9 13 3"/><path d="M5 5l3-2 2 3"/></svg><span>Rough</span></button>
+    <button class="wave-option" type="button" data-wave="4" aria-label="Stormy waves" title="Stormy · 5.2 m"><svg viewBox="0 0 28 18"><path d="M1 15C5 0 10 18 15 5s8 10 12 4"/><path d="M6 4L9 1l3 4M18 4l3-2 3 3"/></svg><span>Storm</span></button>
+  </div></div>
+  <div id="sea-trial-prompt" aria-live="polite">
+    <svg class="sea-trial-arrow" viewBox="0 0 66 34" aria-hidden="true"><path d="M5 29C20 29 38 23 51 9"/><path d="m42 11 10-4 1 11"/></svg>
+    <span class="sea-trial-copy"><strong>Change the sea</strong><small>Try another sea state</small></span>
+  </div>
+</aside>
+<div id="quality-control" class="glass" role="group" data-quality="high" data-mode="auto" aria-label="Rendering quality">
+  <span class="quality-gauge" aria-hidden="true"><svg viewBox="0 0 24 24"><rect class="qb" x="3" y="15" width="3.2" height="6" rx="1.1"/><rect class="qb" x="8.2" y="11.5" width="3.2" height="9.5" rx="1.1"/><rect class="qb" x="13.4" y="8" width="3.2" height="13" rx="1.1"/><rect class="qb" x="18.6" y="4.5" width="3.2" height="16.5" rx="1.1"/></svg></span>
+  <span class="quality-readout"><small>Render</small><strong id="quality-current" aria-live="polite">High</strong></span>
+  <select id="quality-select" aria-label="Rendering quality mode">
+    <option value="auto">Auto</option>
+    <option value="low">Low</option>
+    <option value="medium">Medium</option>
+    <option value="high">High</option>
+    <option value="ultra">Ultra</option>
+  </select>
+</div>
+<button id="achievements-button" type="button" aria-label="Open captain's log achievements" aria-controls="achievements-panel" aria-expanded="false">
+  <svg class="achievements-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h8v4a4 4 0 0 1-8 0V5Z"/><path d="M8 7H5v1.2c0 1.9 1.2 3.1 3.2 3.3M16 7h3v1.2c0 1.9-1.2 3.1-3.2 3.3M12 13v4M9 19h6"/></svg>
+  <span class="achievements-button-label">Achievements</span>
+  <span id="achievements-count">0/23</span>
+  <span class="achievement-unseen-dot" aria-hidden="true"></span>
+</button>
+<section id="achievements-panel" aria-labelledby="achievements-title" aria-hidden="true" inert>
+  <header class="achievements-header">
+    <span class="achievements-kicker">Captain's log</span>
+    <h2 id="achievements-title">Achievements</h2>
+    <span id="achievements-summary">0 of 23 achievements · 0 milestones</span>
+    <span id="achievement-records" role="group" aria-label="Navigation, play time and jump records">
+      <span class="achievement-record"><small>Total distance</small><strong id="achievement-distance-record">0.00 NM</strong></span>
+      <span class="achievement-record"><small>Time played</small><strong id="achievement-time-record">00:00</strong></span>
+      <span class="achievement-record"><small>Jump height</small><strong id="achievement-jump-record">0.0 m</strong></span>
+      <span class="achievement-record"><small>Air time</small><strong id="achievement-air-record">0.00 s</strong></span>
+    </span>
+    <button id="achievements-close" type="button" aria-label="Close achievements"></button>
+  </header>
+  <ol id="achievements-list"></ol>
+</section>
+<div id="achievement-toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="vessel-unlock-alert" role="status" aria-live="polite" aria-atomic="true" aria-hidden="true" title="Take the helm">
+  <span class="vessel-unlock-icon" aria-hidden="true"><svg viewBox="0 0 28 24"><path d="M4 10h19l-4 8H9zM8 10l2-5h8l3 5M2 21c3-2 5 2 8 0s5 2 8 0 5 2 8 0"/></svg></span>
+  <span class="vessel-unlock-copy"><small>New vessel available</small><strong id="vessel-unlock-name"></strong><em id="vessel-unlock-hint">Click to take the helm</em></span>
+</div>
+<nav id="vessel-selector" aria-label="Boat selector">
+  <button id="prev-boat" class="vessel-arrow" type="button" title="Previous boat (Shift+B)" aria-label="Switch to previous boat">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m15 5-7 7 7 7"/></svg>
+  </button>
+  <div class="vessel-current">
+    <span class="vessel-eyebrow">Current vessel</span>
+    <span id="boatname" aria-live="polite">—</span>
+    <span id="boat-position" aria-hidden="true">— / —</span>
+  </div>
+  <button id="next-boat" class="vessel-arrow" type="button" title="Next boat (B)" aria-label="Switch to next boat">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 5 7 7-7 7"/></svg>
+  </button>
+</nav>
+<div id="camera-status" role="status" aria-live="polite"></div>
+<!-- Contenu de base (commandes toujours disponibles) ; « B boat » et « 1–4 sea »
+     sont ajoutés par buildHelpHint() une fois le bateau / les vagues débloqués. -->
+<div id="help">W / ↑ throttle · S / ↓ reverse · A D / ← → rudder · Space stop · C camera / cinema · Mouse orbit · Wheel zoom · R reset · L log</div>
+<div id="drive" role="group" aria-label="Touch controls">
+  <button id="gesture-drive" type="button" aria-label="Touch here, then slide to steer and control throttle" aria-valuetext="Neutral">
+    <span class="drive-ticks" aria-hidden="true"></span>
+    <span class="drive-arrow" aria-hidden="true"><svg viewBox="0 0 36 52"><path d="M18 3v38M7 31l11 12 11-12"/></svg></span>
+    <span class="drive-label">Place your finger here</span>
+    <span class="drive-vector" aria-hidden="true"></span>
+  </button>
+  <div id="drive-tutorial" class="glass" role="status" aria-live="polite">
+    <div class="tutorial-kicker">Touch steering</div>
+    <div class="tutorial-title">Hold, then slide</div>
+    <div class="tutorial-intro">Where you touch becomes <strong>neutral</strong>. Keep your finger down and move from there.</div>
+    <div class="tutorial-map" role="img" aria-label="Slide up to accelerate, down to reverse, left or right to steer">
+      <div class="tutorial-direction tutorial-forward"><span class="tutorial-arrow" aria-hidden="true">↑</span><span><strong>Forward</strong><small>Accelerate</small></span></div>
+      <div class="tutorial-direction tutorial-left"><span class="tutorial-arrow" aria-hidden="true">←</span><span><strong>Left</strong><small>Steer</small></span></div>
+      <div class="tutorial-compass" aria-hidden="true"><span class="tutorial-origin">Hold</span></div>
+      <div class="tutorial-direction tutorial-right"><span class="tutorial-arrow" aria-hidden="true">→</span><span><strong>Right</strong><small>Steer</small></span></div>
+      <div class="tutorial-direction tutorial-reverse"><span class="tutorial-arrow" aria-hidden="true">↓</span><span><strong>Reverse</strong><small>Pull back</small></span></div>
+    </div>
+    <div class="tutorial-release"><span class="tutorial-release-icon" aria-hidden="true"></span><span><strong>Release for neutral</strong><br>Throttle and steering return to center</span></div>
+    <div class="tutorial-camera"><span class="tutorial-camera-badge">2nd finger</span><span>Drag on the water to look around · move vertically to zoom</span></div>
+  </div>
+</div>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

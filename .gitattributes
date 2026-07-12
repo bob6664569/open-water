@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+*.glb -text
+*.hdr -text
+*.mp3 -text
+*.png -text
+*.wav -text
+
+# Preserve upstream Three.js byte-for-byte, including its existing whitespace.
+site/vendor/** whitespace=-blank-at-eol,-space-before-tab

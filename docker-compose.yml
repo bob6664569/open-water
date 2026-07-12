@@ -1,0 +1,9 @@
+services:
+  web:
+    image: nginx:alpine@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa
+    container_name: open-water
+    ports:
+      - "8930:80"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+    restart: unless-stopped

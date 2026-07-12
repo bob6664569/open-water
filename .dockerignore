@@ -1,0 +1,14 @@
+.git/
+.github/
+.claude/
+.env
+.env.*
+.DS_Store
+coverage/
+node_modules/
+tests/
+tools/
+*.md
+!THIRD_PARTY_NOTICES.md
+package*.json
+requirements*.txt

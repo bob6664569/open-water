@@ -1,0 +1,235 @@
+import * as THREE from 'three';
+import { loadGLTFDeferred } from './deferred-loader.js';
+import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+
+// ---------------------------------------------------------------------------
+// Oiseaux de BEAU TEMPS (mer calme / preset 1), module parallèle au système
+// mouettes (wildlife.js) : ceux-là ne volent qu'au calme, filent au large dès
+// que la mer se lève, et ne déclenchent AUCUN cri de mouette.
+//
+//   perroquets (scarlet macaw) : petites escadrilles lâches, colorées.
+//
+// Chaque oiseau bat des ailes via son clip GLB (AnimationMixer) : squelette pour
+// le macaw (skeletonClone).
+//
+// Modèle : « Scarlet Macaw » par Mateus Schwaab (CC-BY-4.0).
+// ---------------------------------------------------------------------------
+
+const _v = new THREE.Vector3();
+const rand = (a, b) => a + Math.random() * (b - a);
+const angLerp = (a, t, k) => a + Math.atan2(Math.sin(t - a), Math.cos(t - a)) * k;
+
+const CALM_PRESET = 1;
+
+// Par espèce :
+//   url/clip/skinned/unlitToStd  span:envergure cible (m)
+//   ORIENTATION (à vérifier en LIVE, bbox ambigu) :
+//     yaw  : rotation Y du modèle. 0 = nez sur +Z. Mettre Math.PI/2 si le modèle
+//            vole DE TRAVERS (envergure alignée à l'axe de vol), + flip si à l'envers.
+//     flip : 0 ou Math.PI (nez pointant vers l'arrière).
+//     pitch: rotation X. Non nul si l'oiseau vole nez en l'air / plongé.
+//   role:'flock'(lâche) | 'vee'(formation en V)  group:[min,max] oiseaux par volée
+//   max:volées simultanées max  interval:[min,max] délai entre volées (s)
+//   alt:[min,max] altitude (m)  speed:[min,max] vitesse (m/s)  flap:[min,max] vitesse de battement
+//   voice:cri procédural (audio.birdCall)  cry:[min,max] délai entre cris d'une volée (s)
+const SPECIES = {
+  macaw: {
+    url: './assets/animals/scarlet_macaw.glb', clip: /fly/i, skinned: true, unlitToStd: true,
+    span: 1.05, yaw: 0, flip: 0, pitch: 0, role: 'flock', group: [2, 4],
+    max: 4, interval: [7, 17], alt: [24, 46], speed: [8, 12.5], flap: [1.1, 1.5],
+    voice: 'parrot', cry: [2.6, 6.5],
+  },
+};
+
+const CRY_RANGE = 260;   // au-delà, on ne déclenche pas de cri (inaudible)
+
+export class Birds {
+  constructor(scene, camera, waveField, audio = null) {
+    this.scene = scene;
+    this.camera = camera;
+    this.wf = waveField;
+    this.audio = audio;
+    this.time = 0;
+
+    this.flights = [];
+    this.timers = {};
+    this.protos = {};   // key -> { root, clip, baseScale, yaw }
+    this.loading = new Set();
+  }
+
+  _load(key) {
+    if (this.protos[key] || this.loading.has(key)) return;
+    this.loading.add(key);
+    const sp = SPECIES[key];
+    loadGLTFDeferred(sp.url, (gltf) => {
+      const root = gltf.scene;
+      const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
+      const baseScale = sp.span / Math.max(size.x, size.z, 1e-3);
+      const clip = gltf.animations.find(c => sp.clip.test(c.name)) || gltf.animations[0];
+      root.traverse(o => {
+        if (!o.isMesh) return;
+        o.frustumCulled = false;   // skinned/morph bbox instable
+        o.castShadow = false;
+        if (sp.unlitToStd && o.material && o.material.isMeshBasicMaterial) {
+          const b = o.material;
+          o.material = new THREE.MeshStandardMaterial({
+            map: b.map || null, color: b.color ? b.color.clone() : new THREE.Color(0xffffff),
+            roughness: 0.85, metalness: 0.0,
+          });
+        }
+      });
+      this.protos[key] = { root, clip, baseScale, yaw: sp.yaw + sp.flip, pitch: sp.pitch || 0 };
+      this.loading.delete(key);
+    }, (e) => {
+      this.loading.delete(key);
+      console.warn('[birds] chargement échoué', sp.url, e);
+    });
+  }
+
+  _makeBird(key) {
+    const p = this.protos[key], sp = SPECIES[key];
+    const model = sp.skinned ? skeletonClone(p.root) : p.root.clone(true);
+    model.rotation.set(p.pitch, p.yaw, 0);   // pitch (X) + yaw (Y) : correction d'assiette du modèle
+    model.scale.setScalar(p.baseScale * rand(0.9, 1.15));
+    const g = new THREE.Group();
+    g.rotation.order = 'YXZ';
+    g.add(model);
+    const mixer = new THREE.AnimationMixer(model);
+    if (p.clip) {
+      const a = mixer.clipAction(p.clip);
+      a.play(); a.time = rand(0, p.clip.duration); a.timeScale = rand(sp.flap[0], sp.flap[1]);
+    }
+    return { g, mixer };
+  }
+
+  // Décalages de formation (repère volée : x=travers, z=avant). V = meneur devant,
+  // suiveurs en quinconce derrière-gauche / derrière-droite. Flock = éventail lâche.
+  _offsets(role, n) {
+    const off = [];
+    if (role === 'vee') {
+      off.push([0, 0]);
+      for (let i = 1; i < n; i++) {
+        const side = i % 2 ? 1 : -1, rank = Math.ceil(i / 2);
+        off.push([side * rank * rand(2.6, 3.4), -rank * rand(2.4, 3.2)]);
+      }
+    } else {
+      for (let i = 0; i < n; i++) off.push([rand(-5, 5), rand(-5, 5)]);
+    }
+    return off;
+  }
+
+  _spawnFlight(key) {
+    const sp = SPECIES[key], cam = this.camera.position;
+    const n = Math.round(rand(sp.group[0], sp.group[1]));
+    const bearing = rand(0, Math.PI * 2), R = rand(120, 200);
+    const center = new THREE.Vector3(
+      cam.x + Math.sin(bearing) * R, rand(sp.alt[0], sp.alt[1]), cam.z + Math.cos(bearing) * R);
+    // cap : traverse la zone visible en passant près du bateau (jitter)
+    const heading = Math.atan2(cam.x + rand(-40, 40) - center.x, cam.z + rand(-40, 40) - center.z);
+    const offs = this._offsets(sp.role, n);
+    const members = [];
+    for (let i = 0; i < n; i++) {
+      const { g, mixer } = this._makeBird(key);
+      this.scene.add(g);
+      members.push({
+        g, mixer, off: offs[i],
+        wobP: rand(0, 6.28), wobF: rand(0.4, 1.1), wobA: rand(0.3, 0.9), // flottement propre
+        altP: rand(0, 6.28), altF: rand(0.2, 0.5),
+      });
+    }
+    this.flights.push({
+      key, center, heading, members,
+      speed: rand(sp.speed[0], sp.speed[1]),
+      wanderP: rand(0, 6.28), wanderF: rand(0.05, 0.14),
+      altBase: center.y, altAmp: rand(1.5, 4), altP: rand(0, 6.28), altF: rand(0.1, 0.24),
+      cryTimer: rand(1.5, sp.cry[1]),
+      life: 0, leaving: false,
+    });
+  }
+
+  _updateFlight(fl, dt, leave) {
+    const t = this.time;
+    fl.life += dt;
+    if (leave) fl.leaving = true;
+
+    if (fl.leaving) {
+      // la mer se lève : la volée grimpe, accélère et file droit au large
+      const cam = this.camera.position;
+      const outward = Math.atan2(fl.center.x - cam.x, fl.center.z - cam.z);
+      fl.heading = angLerp(fl.heading, outward, Math.min(1, dt * 1.2));
+      fl.speed = THREE.MathUtils.damp(fl.speed, 22, 1.2, dt);
+      fl.altBase = Math.min(fl.altBase + 5 * dt, 90);
+    } else {
+      fl.heading += Math.sin(t * fl.wanderF + fl.wanderP) * 0.04 * dt;
+    }
+    fl.center.x += Math.sin(fl.heading) * fl.speed * dt;
+    fl.center.z += Math.cos(fl.heading) * fl.speed * dt;
+    fl.center.y = fl.altBase + Math.sin(t * fl.altF + fl.altP) * fl.altAmp;
+
+    // repère volée : avant (cap) + travers
+    const fx = Math.sin(fl.heading), fz = Math.cos(fl.heading);
+    const rx = fz, rz = -fx;
+    const bank = THREE.MathUtils.clamp(
+      -Math.sin(t * fl.wanderF + fl.wanderP) * 3.5, -0.4, 0.4);
+
+    for (const m of fl.members) {
+      const ox = m.off[0], oz = m.off[1];
+      const wob = Math.sin(t * m.wobF + m.wobP) * m.wobA;
+      m.g.position.set(
+        fl.center.x + rx * (ox + wob * 0.4) + fx * oz,
+        fl.center.y + Math.sin(t * m.altF + m.altP) * 0.6,
+        fl.center.z + rz * (ox + wob * 0.4) + fz * oz);
+      m.g.rotation.set(0, fl.heading, bank);
+      m.mixer.update(dt);
+    }
+  }
+
+  update(dt) {
+    this.time += dt;
+    const preset = this.wf.preset;
+    const calm = preset === CALM_PRESET;
+    if (calm && this.time > 1.5) for (const key of Object.keys(SPECIES)) this._load(key);
+
+    // directeur d'apparition (au calme seulement), par espèce
+    if (calm) {
+      for (const key of Object.keys(SPECIES)) {
+        if (!this.protos[key]) continue;
+        const sp = SPECIES[key];
+        if (this.timers[key] == null) this.timers[key] = rand(1, sp.interval[0]);
+        this.timers[key] -= dt;
+        if (this.timers[key] <= 0) {
+          if (this.flights.filter(f => f.key === key).length < sp.max) this._spawnFlight(key);
+          this.timers[key] = rand(sp.interval[0], sp.interval[1]);
+        }
+      }
+    }
+
+    const cam = this.camera.position;
+    const canCry = this.audio && this.audio.started;
+    for (let i = this.flights.length - 1; i >= 0; i--) {
+      const fl = this.flights[i];
+      this._updateFlight(fl, dt, !calm);
+      _v.set(fl.center.x - cam.x, 0, fl.center.z - cam.z);
+      const dist = _v.length();
+
+      // Cris spatialisés depuis un oiseau de la volée (pas quand elle fuit).
+      if (canCry && !fl.leaving) {
+        const sp = SPECIES[fl.key];
+        fl.cryTimer -= dt;
+        if (fl.cryTimer <= 0) {
+          if (dist < CRY_RANGE) {
+            const m = fl.members[(Math.random() * fl.members.length) | 0];
+            this.audio.birdCall(sp.voice, m.g.position);
+          }
+          fl.cryTimer = rand(sp.cry[0], sp.cry[1]);
+        }
+      }
+
+      const limit = fl.leaving ? 380 : 620;
+      if (dist > limit || fl.life > 120) {
+        for (const m of fl.members) { this.scene.remove(m.g); m.mixer.stopAllAction(); }
+        this.flights.splice(i, 1);
+      }
+    }
+  }
+}

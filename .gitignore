@@ -1,0 +1,28 @@
+.DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# JavaScript dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+.eslintcache
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
