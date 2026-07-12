@@ -26,6 +26,10 @@ const STORM_PRESET = 4; // au-delà : les mouettes fuient vers le large
 const MODEL_URL   = './assets/animals/flying_seagull.glb';
 const TARGET_SPAN = 1.6;      // envergure cible (m) après mise à l'échelle du modèle
 const MODEL_YAW   = 0;        // correction d'orientation du modèle (0 ou Math.PI)
+const GUIDED_BIRD_SCALE = typeof window !== 'undefined'
+  && (window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window)
+  ? 2.35
+  : 1.85;
 
 const rand = (a, b) => a + Math.random() * (b - a);
 // Rapproche `a` de l'angle `target` par le plus court chemin, d'une fraction k.
@@ -143,7 +147,7 @@ export class Wildlife {
     if (this.proto) {
       const model = skeletonClone(this.proto);
       model.rotation.y = MODEL_YAW;
-      model.scale.setScalar(this.baseScale * rand(0.85, 1.25) * (guidedCenter ? 1.45 : 1));
+      model.scale.setScalar(this.baseScale * rand(0.9, 1.2) * (guidedCenter ? GUIDED_BIRD_SCALE : 1));
       g.add(model);
 
       const mixer = new THREE.AnimationMixer(model);
@@ -162,7 +166,7 @@ export class Wildlife {
       bird.mixer = mixer;
     } else {
       const { visual, rp, lp } = buildProceduralGull();
-      visual.scale.setScalar(rand(0.85, 1.4) * (guidedCenter ? 1.45 : 1));
+      visual.scale.setScalar(rand(0.9, 1.25) * (guidedCenter ? GUIDED_BIRD_SCALE : 1));
       g.add(visual);
       bird.rp = rp; bird.lp = lp;
     }
@@ -174,13 +178,13 @@ export class Wildlife {
 
   // Premier voyage : un groupe clairement lisible tourne au-dessus d'une zone
   // d'activité marine. Le modèle habituel est conservé, avec son fallback.
-  spawnGuidedFlockAt(position, count = 9) {
+  spawnGuidedFlockAt(position, count = 14) {
     this._load();
     if (!this.loaded) return false;
     for (let i = 0; i < count; i++) {
       const angle = i / count * Math.PI * 2 + rand(-0.25, 0.25);
-      const radius = rand(10, 21);
-      const altitude = rand(9, 15);
+      const radius = rand(8, 16);
+      const altitude = rand(10, 17);
       const pos = new THREE.Vector3(
         position.x + Math.sin(angle) * radius,
         altitude,
@@ -195,6 +199,15 @@ export class Wildlife {
       bird.orbitSign = orbitSign;
     }
     return true;
+  }
+
+  releaseGuidedFlock() {
+    for (const bird of this.gulls) {
+      if (!bird.guidedCenter) continue;
+      bird.guidedCenter = null;
+      bird.guided = false;
+      bird.life = 0;
+    }
   }
 
   _updateGull(b, dt, flee) {
@@ -227,9 +240,9 @@ export class Wildlife {
       return;
     }
 
-    // Les oiseaux du premier voyage cerclent la zone assez longtemps pour être
-    // vus depuis la caméra de poursuite, puis reprennent leur vol naturel.
-    if (b.guidedCenter && b.life < 78) {
+    // Les oiseaux du premier voyage restent ancrés à la rencontre jusqu'à sa
+    // fin explicite ; ils ne dérivent jamais pendant que le joueur les rejoint.
+    if (b.guidedCenter) {
       const dx = b.pos.x - b.guidedCenter.x;
       const dz = b.pos.z - b.guidedCenter.z;
       const angle = Math.atan2(dx, dz);
@@ -312,7 +325,7 @@ export class Wildlife {
       this._updateGull(b, dt, flee);
       const limit = b.fleeing ? this.fleeRadius : this.despawnRadius;
       _v.set(b.pos.x - cam.x, 0, b.pos.z - cam.z);
-      if (_v.length() > limit || b.life > 90) {
+      if (!b.guidedCenter && (_v.length() > limit || b.life > 90)) {
         this.scene.remove(b.g);
         if (b.mixer) b.mixer.stopAllAction();
         this.gulls.splice(i, 1);

@@ -176,6 +176,9 @@ const birds = new Birds(scene, camera, waveField, audio);    // perroquets (calm
 const achievements = new AchievementManager();
 const achievementFauna = { dolphins, whales, turtles, mantas, fish };
 const firstVoyageGuide = new FirstVoyageGuide({ scene, camera, boat, waveField, achievements, fish, wildlife });
+achievements.button?.addEventListener('click', () => {
+  document.body.classList.remove('achievement-trial-visible');
+});
 
 // ---------------- sélecteur de bateaux (dossier assets/boats, touche B) ----
 // convention: nom_LONGUEUR.glb (ex: zefiro_6.5.glb) sinon 6,5 m
@@ -488,12 +491,30 @@ function updateVesselSelector(spec, direction = 0) {
 async function loadBoatByIndex(i, { initial = false, direction = 0 } = {}) {
   if (!boatList.length) return;
   if (!initial) dismissVesselUnlockAlert();
+  // Un changement de modèle en pleine navigation ne doit pas téléporter le
+  // joueur au point de départ. C'était particulièrement visible pendant le
+  // premier voyage : les balises restaient en place, mais le bateau repartait
+  // de l'origine. On conserve donc la continuité de la traversée.
+  const navigationState = initial ? null : {
+    position: boat.pos.clone(),
+    orientation: boat.quat.clone(),
+    velocity: boat.vel.clone(),
+    angularVelocity: boat.angVelB.clone(),
+    rideHeight: boat.spec?.rideHeight ?? 0,
+  };
   boatIdx = ((i % boatList.length) + boatList.length) % boatList.length;
   const name = boatList[boatIdx];
   const m = name.match(/_(\d+(?:\.\d+)?)(r)?\.glb$/i);
   const spec = getVesselSpec(name);
   boat.setSpec(spec);
   boat.reset();
+  if (navigationState) {
+    boat.pos.copy(navigationState.position);
+    boat.pos.y += (spec.rideHeight ?? 0) - navigationState.rideHeight;
+    boat.quat.copy(navigationState.orientation);
+    boat.vel.copy(navigationState.velocity);
+    boat.angVelB.copy(navigationState.angularVelocity);
+  }
   achievements.resetFlight();
   achievements.resetCircle();
   if (!initial) boatLoader.classList.add('visible');
@@ -1002,7 +1023,14 @@ function updateGestureFromPointer(e) {
 }
 if (gestureDrive) {
   gestureDrive.addEventListener('pointerdown', (e) => {
-    if (gestureState.active || (e.button !== undefined && e.button !== 0)) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    // Safari peut exceptionnellement perdre toute la fin d'une séquence
+    // tactile. Un nouveau contact doit alors reprendre la main au lieu d'être
+    // rejeté indéfiniment par l'ancien état fantôme.
+    if (gestureState.active) {
+      if (e.pointerId === gestureState.id) return;
+      resetGestureDrive();
+    }
     e.preventDefault();
     audio.start();
     dismissVoyageIntro();   // le premier contact sur le pad cède le centre au tutoriel de conduite
@@ -1030,14 +1058,32 @@ if (gestureDrive) {
   gestureDrive.addEventListener('pointerup', releaseGesture);
   gestureDrive.addEventListener('pointercancel', releaseGesture);
   gestureDrive.addEventListener('lostpointercapture', releaseGesture);
+
+  // La capture du pointeur est normalement suffisante, mais certains gestes
+  // interrompus sur iOS ne rendent pas leur pointerup au bouton. Intercepter
+  // aussi la fin au niveau window garantit le retour au neutre avant qu'une
+  // autre couche d'interface puisse consommer l'événement.
+  addEventListener('pointerup', releaseGesture, true);
+  addEventListener('pointercancel', releaseGesture, true);
+  addEventListener('touchend', (e) => {
+    if (!gestureState.active) return;
+    const endedOnDrive = e.target instanceof Node && gestureDrive.contains(e.target);
+    if (endedOnDrive || e.touches.length === 0) resetGestureDrive();
+  }, { passive: true, capture: true });
+  addEventListener('touchcancel', () => {
+    if (gestureState.active) resetGestureDrive();
+  }, { passive: true, capture: true });
+  addEventListener('pagehide', resetGestureDrive);
 }
 
 function setWaveIntensity(level, { userInitiated = false } = {}) {
   if (!SEA_PRESETS[level]) return;
   const changed = waveField.preset !== level;
   if (userInitiated && changed) {
+    const continueOnboarding = document.body.classList.contains('sea-trial-visible');
     achievements.recordWaveChange();
     document.body.classList.remove('sea-trial-visible');
+    if (continueOnboarding) document.body.classList.add('achievement-trial-visible');
   }
   waveField.setSeaPreset(level);
   achievements.recordSea(level);

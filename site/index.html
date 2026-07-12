@@ -137,6 +137,19 @@
   @keyframes achievement-badge-pulse {
     0%, 100% { box-shadow: 0 0 7px rgba(207,240,255,.6), 0 0 13px rgba(168,227,255,.42), 0 0 0 0 rgba(168,227,255,.38); }
     50%      { box-shadow: 0 0 8px rgba(207,240,255,.8), 0 0 16px rgba(168,227,255,.6), 0 0 0 5px rgba(168,227,255,0); } }
+  #achievement-trial-prompt { position: fixed; z-index: 11; right: 18px; bottom: calc(62px + var(--dock-lift));
+    width: 236px; max-height: 0; display: flex; flex-direction: column; align-items: flex-end; overflow: hidden;
+    color: rgba(242,250,253,.9); text-align: right; text-shadow: 0 2px 7px rgba(0,0,0,.62); pointer-events: none;
+    opacity: 0; transform: translateY(8px); transition: max-height .45s var(--ease), opacity .35s var(--ease),
+      transform .45s var(--ease), bottom .6s var(--ease); }
+  body.achievement-trial-visible #achievement-trial-prompt { max-height: 116px; opacity: 1; transform: none; }
+  .achievement-trial-copy strong { display: block; font: italic 400 16px/1.1 Georgia, "Times New Roman", serif; }
+  .achievement-trial-copy small { display: block; margin-top: 6px; color: rgba(230,244,250,.64);
+    font: 700 7px/1.35 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .11em; text-transform: uppercase; }
+  .achievement-trial-arrow { display: block; width: 66px; height: 34px; margin: 9px 17px 0 0; overflow: visible;
+    fill: none; stroke: rgba(247,252,255,.9); stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); animation: achievement-trial-point 1.45s var(--ease) infinite; }
+  @keyframes achievement-trial-point { 50% { transform: translate(2px, 3px); opacity: .58; } }
   #achievements-panel { position: fixed; z-index: 18; right: 18px; left: auto; bottom: calc(62px + var(--dock-lift)); width: min(360px, calc(100vw - 36px));
     max-height: min(610px, calc(100vh - 174px)); display: flex; flex-direction: column; overflow: hidden;
     border-radius: 18px; color: rgba(238,249,253,.9);
@@ -404,14 +417,17 @@
   /* ---- première traversée : une carte de navigation sobre, plus proche d'un
      journal de bord que d'un tutoriel de jeu. Elle accompagne uniquement le
      premier demi-mille et s'efface dès que l'océan libre est compris. ---- */
-  #first-voyage-guide { position: fixed; z-index: 13; top: 18px; left: 50%;
-    width: min(420px, calc(100vw - 220px)); padding: 13px 46px 12px 16px; overflow: hidden;
+  #first-voyage-guide { position: fixed; z-index: 26;
+    top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%;
+    box-sizing: border-box; width: min(420px, calc(100vw - 220px)); height: 104px;
+    padding: 13px 46px 12px 16px; overflow: hidden;
     border: 1px solid rgba(211,240,251,.14); border-radius: 14px; color: rgba(241,250,253,.92);
     background: linear-gradient(105deg, rgba(3,17,28,.72), rgba(6,27,41,.56));
     box-shadow: 0 14px 38px rgba(0,0,0,.2), inset 0 1px rgba(255,255,255,.055);
     backdrop-filter: blur(17px) saturate(120%); -webkit-backdrop-filter: blur(17px) saturate(120%);
     opacity: 0; visibility: hidden; transform: translate(-50%, -10px);
-    transition: opacity .5s var(--ease), transform .55s var(--ease), visibility .5s, top .45s var(--ease); }
+    transition: width .4s var(--ease), height .4s var(--ease), padding .4s var(--ease),
+      opacity .5s var(--ease), transform .55s var(--ease), visibility .5s; }
   #first-voyage-guide[hidden] { display: none; }
   #first-voyage-guide.visible { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
   #first-voyage-guide.stage-complete { border-color: rgba(180,231,251,.27);
@@ -419,7 +435,11 @@
   #first-voyage-guide.waypoint-reached { border-color: rgba(204,243,255,.38);
     box-shadow: 0 16px 46px rgba(0,0,0,.22), 0 0 0 1px rgba(168,227,255,.08),
       0 0 38px rgba(116,202,238,.14), inset 0 1px rgba(255,255,255,.1); }
-  body:has(.achievement-toast.visible) #first-voyage-guide { top: 104px; }
+  /* Les récompenses se rangent sous la mission : elles ne la déplacent jamais. */
+  body:has(#first-voyage-guide.visible) #achievement-toast-region {
+    top: calc(env(safe-area-inset-top, 0px) + 126px); }
+  body:has(#first-voyage-guide.visible.collapsed) #achievement-toast-region {
+    top: calc(env(safe-area-inset-top, 0px) + 62px); }
   .first-voyage-heading { min-width: 0; }
   #first-voyage-kicker { display: block; color: rgba(168,227,255,.62);
     font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .22em; text-transform: uppercase; }
@@ -427,11 +447,15 @@
     font: italic 400 19px/1.08 Georgia, "Times New Roman", serif; white-space: nowrap; }
   #first-voyage-copy { display: block; margin-top: 6px; color: rgba(226,243,250,.62);
     font: 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .035em; }
-  #first-voyage-skip { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; padding: 0;
+  #first-voyage-toggle { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; padding: 0;
     border: 0; border-radius: 50%; color: rgba(224,242,250,.4); background: transparent; cursor: pointer;
-    font: 17px/1 Georgia, serif; transition: color .18s, background .18s, transform .18s var(--ease); }
-  #first-voyage-skip:hover { color: rgba(245,252,255,.9); background: rgba(255,255,255,.07); transform: scale(1.06); }
-  #first-voyage-skip:focus-visible { outline: 1px solid rgba(200,238,252,.7); outline-offset: 2px; }
+    transition: color .18s, background .18s, transform .18s var(--ease); }
+  #first-voyage-toggle::before, #first-voyage-toggle::after { content: ""; position: absolute; top: 13px;
+    width: 8px; height: 1px; border-radius: 1px; background: currentColor; transition: transform .3s var(--ease); }
+  #first-voyage-toggle::before { left: 7px; transform: rotate(-38deg); }
+  #first-voyage-toggle::after { right: 7px; transform: rotate(38deg); }
+  #first-voyage-toggle:hover { color: rgba(245,252,255,.9); background: rgba(255,255,255,.07); transform: scale(1.06); }
+  #first-voyage-toggle:focus-visible { outline: 1px solid rgba(200,238,252,.7); outline-offset: 2px; }
   .first-voyage-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 11px; }
   .first-voyage-step { position: relative; height: 2px; overflow: hidden; border-radius: 999px;
     background: rgba(218,244,255,.12); }
@@ -440,6 +464,15 @@
   .first-voyage-step.done::after, .first-voyage-step.active::after { transform: scaleX(1); }
   .first-voyage-step.active::after { animation: first-voyage-breathe 1.8s ease-in-out infinite; }
   @keyframes first-voyage-breathe { 50% { opacity: .45; } }
+  #first-voyage-guide.collapsed { width: min(330px, calc(100vw - 220px)); height: 44px;
+    padding: 11px 46px 10px 15px; }
+  #first-voyage-guide.collapsed #first-voyage-kicker,
+  #first-voyage-guide.collapsed #first-voyage-copy,
+  #first-voyage-guide.collapsed .first-voyage-steps { display: none; }
+  #first-voyage-guide.collapsed #first-voyage-title { margin-top: 0; font-size: 17px; line-height: 21px; }
+  #first-voyage-guide.collapsed #first-voyage-toggle { top: 7px; }
+  #first-voyage-guide.collapsed #first-voyage-toggle::before { transform: rotate(38deg); }
+  #first-voyage-guide.collapsed #first-voyage-toggle::after { transform: rotate(-38deg); }
   .loader { position: fixed; z-index: 20; transition: opacity .55s var(--ease), visibility .55s; }
   .loader.done { opacity: 0; visibility: hidden; pointer-events: none; }
   #loading { z-index: 40; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 42%, #15354a, #06121f 58%); }
@@ -590,8 +623,10 @@
     .voyage-intro-inner { width: min(440px, 100%); margin-top: 15vh; transform: none; }
     .voyage-intro-lead { font-size: clamp(30px, 9vw, 44px); }
     .voyage-intro-sub { max-width: 330px; font-size: clamp(13.5px, 4vw, 16px); }
-    #first-voyage-guide { top: 72px; width: calc(100vw - 24px); padding: 11px 42px 10px 13px; }
-    body:has(.achievement-toast.visible) #first-voyage-guide { top: 154px; }
+    #first-voyage-guide { top: calc(env(safe-area-inset-top, 0px) + 8px);
+      width: calc(100vw - 24px); height: 100px; padding: 11px 42px 10px 13px; }
+    #first-voyage-guide.collapsed { width: min(310px, calc(100vw - 24px)); height: 44px;
+      padding: 11px 42px 10px 13px; }
     #first-voyage-title { font-size: 17px; }
     #first-voyage-copy { max-width: calc(100vw - 90px); }
     body.dock-revealed { --dock-lift: 72px; }
@@ -599,6 +634,8 @@
       min-width: 84px; padding-left: 7px; gap: 6px; background: rgba(3,17,28,.48); }
     /* identique au desktop : pilule complète avec texte, ancrée en bas à droite */
     #achievements-button { right: 12px; left: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--dock-lift)); }
+    #achievement-trial-prompt { right: 12px; bottom: calc(58px + env(safe-area-inset-bottom, 0px) + var(--dock-lift));
+      width: min(236px, calc(100vw - 24px)); }
     #achievements-panel { right: 12px; left: auto; bottom: calc(56px + env(safe-area-inset-bottom, 0px) + var(--dock-lift));
       width: calc(100vw - 24px); max-height: calc(100vh - 152px - env(safe-area-inset-bottom, 0px)); }
     #achievement-toast-region { top: 74px; }
@@ -662,7 +699,8 @@
     <strong id="first-voyage-title">Take the helm</strong>
     <span id="first-voyage-copy">Push the throttle and make way.</span>
   </div>
-  <button id="first-voyage-skip" type="button" aria-label="Skip first voyage guidance" title="Skip guidance">×</button>
+  <button id="first-voyage-toggle" type="button" aria-label="Minimize first voyage guidance"
+    aria-expanded="true" title="Minimize guidance"></button>
   <div class="first-voyage-steps" aria-hidden="true">
     <i class="first-voyage-step active"></i><i class="first-voyage-step"></i>
     <i class="first-voyage-step"></i><i class="first-voyage-step"></i>
@@ -710,6 +748,10 @@
   <span id="achievements-count">0/23</span>
   <span class="achievement-unseen-dot" aria-hidden="true"></span>
 </button>
+<div id="achievement-trial-prompt" aria-live="polite">
+  <span class="achievement-trial-copy"><strong>Continue the adventure</strong><small>Check achievements and discover what remains to unlock</small></span>
+  <svg class="achievement-trial-arrow" viewBox="0 0 66 34" aria-hidden="true"><path d="M5 5c17 0 35 7 48 21"/><path d="m43 23 11 5-1-11"/></svg>
+</div>
 <section id="achievements-panel" aria-labelledby="achievements-title" aria-hidden="true" inert>
   <header class="achievements-header">
     <span class="achievements-kicker">Captain's log</span>

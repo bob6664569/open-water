@@ -302,7 +302,7 @@ export class FishLife {
     const bearing = rand(0, Math.PI * 2), R = rand(spawnRadius[0], spawnRadius[1]);
     const guided = !!guidedCenter;
     const center = guided
-      ? guidedCenter.clone().setY(-0.42)
+      ? guidedCenter.clone().setY(this.wf.heightAt(guidedCenter.x, guidedCenter.z) - 0.42)
       : new THREE.Vector3(
         cam.x + Math.sin(bearing) * R,
         rand(DEPTH[0] + 0.4, DEPTH[1] - 0.4),
@@ -330,7 +330,7 @@ export class FishLife {
         rand(-spread, spread),
         guided ? rand(-0.22, 0.18) : rand(-Math.min(1.5, spread * 0.3), Math.min(1.5, spread * 0.3)),
         rand(-spread, spread)));
-      clampDepth(pos, guided ? -0.2 : DEPTH[1]);
+      clampDepth(pos, guided ? this.wf.heightAt(center.x, center.z) - 0.12 : DEPTH[1]);
       g.position.copy(pos);
       this.scene.add(g);
       const memberSpeed = sp.memberSpeed || [0.6, 1.1];
@@ -355,26 +355,38 @@ export class FishLife {
   // Premier voyage : prépare puis place un vrai banc sur le cap suggéré.
   // Le chargement reste différé/séquentiel ; l'appelant réessaie simplement
   // jusqu'à ce que le prototype soit prêt, sans dupliquer le téléchargement.
-  spawnGuidedSchoolAt(position, heading = 0) {
+  spawnGuidedSchoolsAt(position, heading = 0) {
     const key = this.wf.preset === 2 ? 'tuna' : null;
-    if (!key) return null;
+    if (!key) return [];
     this._load(key);
-    if (this.guidedFallbackSchool) return this.guidedFallbackSchool;
+    if (this.guidedFallbackSchools?.length) return this.guidedFallbackSchools;
     // Le tutoriel ne dépend volontairement pas du GLB : le fallback est plus
-    // dense, plus proche de la surface et disponible instantanément.
-    return this._spawnGuidedFallbackSchool(position, heading);
+    // dense, plus proche de la surface et disponible instantanément. Cinq
+    // centres fixes forment une vraie zone lisible sous la ronde d'oiseaux.
+    const schools = [];
+    for (let i = 0; i < 5; i++) {
+      const angle = i / 5 * Math.PI * 2 + 0.32;
+      const radius = i === 0 ? 0 : 13;
+      const center = position.clone().add(new THREE.Vector3(
+        Math.sin(angle) * radius, 0, Math.cos(angle) * radius,
+      ));
+      schools.push(this._spawnGuidedFallbackSchool(center, heading + rand(-0.35, 0.35), 18));
+    }
+    this.guidedFallbackSchools = schools;
+    return schools;
   }
 
   prepareGuidedSchool() {
     if (this.wf.preset === 2) this._load('tuna');
   }
 
-  _spawnGuidedFallbackSchool(position, heading) {
+  _spawnGuidedFallbackSchool(position, heading, count = 18) {
     const { body, tail, materials } = guidedFallbackAssets();
-    const center = position.clone().setY(-0.36);
+    const surfaceY = this.wf.heightAt(position.x, position.z);
+    const center = position.clone().setY(surfaceY - 0.38);
     const members = [];
     const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < count; i++) {
       const material = materials[i % materials.length];
       const g = new THREE.Group();
       const bodyMesh = new THREE.Mesh(body, material);
@@ -384,13 +396,13 @@ export class FishLife {
       g.add(bodyMesh, tailMesh);
       g.scale.setScalar(rand(1.35, 1.9));
       const angle = rand(0, Math.PI * 2);
-      const radius = Math.sqrt(Math.random()) * 11;
+      const radius = Math.sqrt(Math.random()) * 5.8;
       const pos = center.clone().add(new THREE.Vector3(
         Math.sin(angle) * radius,
         rand(-0.14, 0.18),
         Math.cos(angle) * radius,
       ));
-      clampDepth(pos, -0.12);
+      clampDepth(pos, surfaceY - 0.12);
       g.position.copy(pos);
       this.scene.add(g);
       members.push({
@@ -400,19 +412,19 @@ export class FishLife {
     }
     const school = {
       key: 'guided-fallback', center, members, guided: true,
-      heading, speed: 0.82,
-      cohesion: 0.42, alignment: 0.72, separation: 0.62,
+      guidedEncounter: true, anchored: true,
+      heading, speed: 0.38,
+      cohesion: 0.58, alignment: 0.5, separation: 0.72,
       wanderPhase: rand(0, 6.28), wanderFreq: 0.07,
       depthPhase: rand(0, 6.28), depthFreq: 0.06,
       scatterTime: 0, scattered: false, scatterCooldown: 0, calmTime: 0,
-      regroupRadius: 18, life: 0,
+      regroupRadius: 9, life: 0,
     };
     this.schools.push(school);
-    this.guidedFallbackSchool = school;
     return school;
   }
 
-  scatterGuidedSchool(school) {
+  _scatterGuidedSchool(school) {
     if (!school || school.scattered || !school.guided || !this.boat) return false;
     for (const member of school.members) {
       let dx = member.pos.x - this.boat.pos.x;
@@ -427,10 +439,35 @@ export class FishLife {
       member.vel.set(dx * inv * rand(5.5, 8.5), rand(-2.2, -0.7), dz * inv * rand(5.5, 8.5));
     }
     school.scattered = true;
+    school.anchored = false;
+    school.guidedEncounter = false;
+    school.cohesion = 0.035;
+    school.alignment = 0.12;
+    school.separation = 1.15;
     school.scatterCooldown = SCHOOL_REARM_COOLDOWN;
     school.calmTime = 0;
-    this.dispersedSchools += 1;
     return true;
+  }
+
+  scatterGuidedSchools(schools) {
+    let scattered = false;
+    for (const school of schools || []) scattered = this._scatterGuidedSchool(school) || scattered;
+    // Les cinq bancs constituent une seule rencontre pour les achievements.
+    if (scattered) this.dispersedSchools += 1;
+    return scattered;
+  }
+
+  removeGuidedSchools(schools) {
+    for (const school of schools || []) {
+      const index = this.schools.indexOf(school);
+      if (index < 0) continue;
+      for (const member of school.members) {
+        this.scene.remove(member.g);
+        member.mixer.stopAllAction();
+      }
+      this.schools.splice(index, 1);
+    }
+    if (this.guidedFallbackSchools === schools) this.guidedFallbackSchools = null;
   }
 
   _spawnSolo(key) {
@@ -508,11 +545,14 @@ export class FishLife {
     s.life += dt;
     // Le centre du banc erre TRÈS légèrement (sinon il ne traverse jamais le
     // champ) : l'amplitude du cap vaut coef/wanderFreq, d'où un coef minuscule.
-    s.heading += Math.sin(t * s.wanderFreq + s.wanderPhase) * 0.015 * dt;
-    s.center.x += Math.sin(s.heading) * s.speed * dt;
-    s.center.z += Math.cos(s.heading) * s.speed * dt;
+    s.heading += (s.anchored ? 0.08 : Math.sin(t * s.wanderFreq + s.wanderPhase) * 0.015) * dt;
+    if (!s.anchored) {
+      s.center.x += Math.sin(s.heading) * s.speed * dt;
+      s.center.z += Math.cos(s.heading) * s.speed * dt;
+    }
+    const guidedSurfaceY = s.guided ? this.wf.heightAt(s.center.x, s.center.z) : 0;
     s.center.y = s.guided
-      ? THREE.MathUtils.clamp(-0.46 + Math.sin(t * s.depthFreq + s.depthPhase) * 0.16, -0.72, -0.24)
+      ? guidedSurfaceY - 0.42 + Math.sin(t * s.depthFreq + s.depthPhase) * 0.1
       : THREE.MathUtils.clamp(
         -2.2 + Math.sin(t * s.depthFreq + s.depthPhase) * 0.9, DEPTH[0], DEPTH[1]);
 
@@ -553,11 +593,15 @@ export class FishLife {
       const cl = THREE.MathUtils.clamp(sp, 0.4, vmax) / sp;
       m.vel.multiplyScalar(cl);
       m.pos.addScaledVector(m.vel, dt);
-      clampDepth(m.pos, s.guided ? -0.18 : DEPTH[1]);
+      clampDepth(m.pos, s.guided ? guidedSurfaceY - 0.12 : DEPTH[1]);
       m.g.position.copy(m.pos);
       orientTo(m.g, m.vel);
       m.mixer.update(dt);
     }
+    // Les cinq bancs du tutoriel restent ancrés jusqu'au passage au centre ;
+    // leur dispersion groupée est déclenchée explicitement par FirstVoyageGuide.
+    if (s.guidedEncounter) return;
+
     // Une simple esquive individuelle ne compte pas : le bateau doit faire
     // réagir ensemble une part significative d'un vrai banc (3 poissons min).
     const scattering = M.length >= 3
@@ -742,7 +786,7 @@ export class FishLife {
       const s = this.schools[i];
       this._updateSchool(s, dt);
       _v.set(s.center.x - cam.x, 0, s.center.z - cam.z);
-      if (_v.length() > DESPAWN || s.life > 165) {
+      if (!s.guidedEncounter && (_v.length() > DESPAWN || s.life > 165)) {
         for (const m of s.members) { this.scene.remove(m.g); m.mixer.stopAllAction(); }
         this.schools.splice(i, 1);
       }

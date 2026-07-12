@@ -102,24 +102,22 @@ function makeDirectionArrow() {
     bevelSize: 0.045, bevelThickness: 0.045,
   });
   geometry.center();
-  const group = new THREE.Group();
-  const arrows = [];
-  for (let i = 0; i < 3; i++) {
-    const material = new THREE.MeshBasicMaterial({
-      color: 0x72d7ff, transparent: true, opacity: 0.9,
-      depthTest: false, depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.y = 0.48 - i * 0.52;
-    mesh.scale.setScalar(0.72);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 1000;
-    arrows.push(mesh);
-    group.add(mesh);
-  }
-  group.visible = false;
-  group.userData.arrows = arrows;
-  return group;
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xe9fbff,
+    emissive: 0x49bde9,
+    emissiveIntensity: 0.62,
+    roughness: 0.24,
+    metalness: 0.12,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const arrow = new THREE.Mesh(geometry, material);
+  arrow.visible = false;
+  arrow.frustumCulled = false;
+  arrow.renderOrder = 1000;
+  return arrow;
 }
 
 function makeSightingPoint() {
@@ -144,7 +142,7 @@ export class FirstVoyageGuide {
     this.title = document.getElementById('first-voyage-title');
     this.copy = document.getElementById('first-voyage-copy');
     this.steps = [...document.querySelectorAll('.first-voyage-step')];
-    this.skipButton = document.getElementById('first-voyage-skip');
+    this.toggleButton = document.getElementById('first-voyage-toggle');
 
     this.active = false;
     this.stage = 'idle';
@@ -156,16 +154,20 @@ export class FirstVoyageGuide {
     this.directionArrow = makeDirectionArrow();
     this.scene.add(this.directionArrow);
     this.target = new THREE.Vector3();
-    this.guidedSchool = null;
+    this.guidedSchools = [];
     this.guidedBirdsSpawned = false;
-    this.dispersedAtStart = 0;
     this.initialBoatId = null;
     this.initialSea = null;
     this.experimented = false;
     this.arrivalTimer = null;
 
-    this.skipButton?.addEventListener('click', event => {
-      this.stop('skipped');
+    this.toggleButton?.addEventListener('click', event => {
+      const collapsed = this.root?.classList.toggle('collapsed') || false;
+      this.toggleButton.setAttribute('aria-expanded', String(!collapsed));
+      this.toggleButton.setAttribute('aria-label', collapsed
+        ? 'Expand first voyage guidance'
+        : 'Minimize first voyage guidance');
+      this.toggleButton.title = collapsed ? 'Expand guidance' : 'Minimize guidance';
       if (event.detail > 0) event.currentTarget.blur();
     });
   }
@@ -185,6 +187,10 @@ export class FirstVoyageGuide {
     this.initialBoatId = this.boat.spec?.id;
     this.initialSea = this.waveField.preset;
     this.fish.prepareGuidedSchool();
+    this.root.classList.remove('collapsed');
+    if (this.toggleButton) {
+      this.toggleButton.setAttribute('aria-expanded', 'true');
+    }
     this.root.hidden = false;
     this.root.setAttribute('aria-hidden', 'false');
     this._setStage('throttle');
@@ -197,6 +203,8 @@ export class FirstVoyageGuide {
     this.arrivalTimer = null;
     this._removeAllMarkers();
     this.directionArrow.visible = false;
+    this.wildlife?.releaseGuidedFlock();
+    if (reason !== 'complete') this.fish.removeGuidedSchools(this.guidedSchools);
     // Une fin normale ne retire pas l'incitation aux états de mer : elle vit
     // désormais jusqu'au premier changement effectif (géré dans main.js).
     if (reason !== 'complete') document.body.classList.remove('sea-trial-visible');
@@ -230,14 +238,13 @@ export class FirstVoyageGuide {
       this._placeBuoy(115, -195);
       this._show('WAYPOINT 02 · 03', 'Find the second buoy', 'Turn and line up your course with the next blue light.');
     } else if (stage === 'course-two') {
-      this._placeBuoy(220, 80);
+      this._placeBuoy(105, 45);
       this._show('WAYPOINT 03 · 03', 'Confirm your course', 'Reach the final blue light cone.');
     } else if (stage === 'sighting') {
-      this.dispersedAtStart = this.fish.dispersedSchools;
-      this.guidedSchool = null;
+      this.guidedSchools = [];
       this.guidedBirdsSpawned = false;
       this._placeFinalSightingPoint();
-      this._show('OPEN-WATER SIGHTING', 'Look to the sky', 'Follow the birds. The 3D arrows will guide you if they leave view.');
+      this._show('OPEN-WATER SIGHTING', 'Look to the sky', 'Follow the birds. The white-blue arrow will guide you if they leave view.');
     } else if (stage === 'experiment') {
       this._removeAllMarkers();
       this.directionArrow.visible = false;
@@ -272,7 +279,7 @@ export class FirstVoyageGuide {
 
   _placeFinalSightingPoint() {
     const remaining = Math.max(0, OPEN_WATER_METERS - this.achievements.state.distanceMeters);
-    const leg = THREE.MathUtils.clamp(remaining + 45, 220, 520);
+    const leg = THREE.MathUtils.clamp(remaining + 35, 135, 240);
     this._boatBasis();
     // Dernier changement de rythme : la ronde est sur le bord opposé, à ~58°,
     // tout en conservant exactement la longueur de jambe nécessaire au 0,5 NM.
@@ -289,19 +296,18 @@ export class FirstVoyageGuide {
     if (!this.marker) return;
     const distance = horizontalDistance(this.boat.pos, this.target);
     if (!this.guidedBirdsSpawned) {
-      this.guidedBirdsSpawned = this.wildlife?.spawnGuidedFlockAt(this.target, 9) || false;
+      this.guidedBirdsSpawned = this.wildlife?.spawnGuidedFlockAt(this.target, 14) || false;
       if (this.guidedBirdsSpawned) {
-        this._show('WILDLIFE SIGHTED', 'Follow the circling flock', 'Keep the birds in view, or follow the blue arrows.');
+        this._show('WILDLIFE SIGHTED', 'Follow the circling flock', 'Keep the birds in view, or follow the white-blue arrow.');
       }
     }
-    // Les poissons ne sont placés qu'à l'approche : ils restent ainsi sous la
-    // bouée au moment du passage au lieu d'avoir dérivé pendant toute la route.
-    if (!this.guidedSchool && distance <= 150) {
+    // Cinq bancs ancrés apparaissent assez tôt pour être vus pendant l'approche.
+    if (!this.guidedSchools.length && distance <= 260) {
       this._boatBasis();
       const heading = Math.atan2(_right.x, _right.z);
-      this.guidedSchool = this.fish.spawnGuidedSchoolAt(this.target, heading);
-      if (this.guidedSchool) {
-        this._show('MOVEMENT BELOW', 'Fish beneath the flock', 'Pass below the birds and watch the school scatter.');
+      this.guidedSchools = this.fish.spawnGuidedSchoolsAt(this.target, heading);
+      if (this.guidedSchools.length) {
+        this._show('MOVEMENT BELOW', 'Fish schools beneath the flock', 'Cross the center and watch them break apart.');
       }
     }
   }
@@ -374,11 +380,7 @@ export class FirstVoyageGuide {
     arrow.rotateZ(Math.atan2(edgeY, edgeX) - Math.PI / 2);
     const pulse = 0.86 + Math.sin(this.elapsed * 4.2) * 0.1;
     arrow.scale.setScalar(pulse);
-    arrow.userData.arrows.forEach((mesh, index) => {
-      mesh.material.opacity = 0.48 + 0.4 * (
-        0.5 + 0.5 * Math.sin(this.elapsed * 5.2 - index * 0.75)
-      );
-    });
+    arrow.material.opacity = 0.82 + Math.sin(this.elapsed * 4.2) * 0.1;
   }
 
   _arriveAtWaypoint(nextStage) {
@@ -399,6 +401,7 @@ export class FirstVoyageGuide {
     this.stageElapsed = 0;
     this._removeAllMarkers();
     this.directionArrow.visible = false;
+    this.wildlife?.releaseGuidedFlock();
     this.root?.classList.remove('visible');
     this.root?.setAttribute('aria-hidden', 'true');
   }
@@ -436,11 +439,14 @@ export class FirstVoyageGuide {
 
     if (this.stage === 'sighting') {
       this._spawnSightingLife();
-      const crossedSchool = this.guidedSchool
-        && horizontalDistance(this.boat.pos, this.target) < 26;
-      if (crossedSchool) this.fish.scatterGuidedSchool(this.guidedSchool);
-      const dispersed = this.fish.dispersedSchools > this.dispersedAtStart;
-      if (dispersed) this._finishAfterSchoolDispersal();
+      // Chacun des cinq bancs est une entrée valide. Le centre global ne sert
+      // qu'à placer les oiseaux et les flèches, jamais à choisir un « bon » banc.
+      const crossedEncounter = this.guidedSchools.some(school => (
+        horizontalDistance(this.boat.pos, school.center) < 18
+      ));
+      if (crossedEncounter && this.fish.scatterGuidedSchools(this.guidedSchools)) {
+        this._finishAfterSchoolDispersal();
+      }
       return;
     }
 
