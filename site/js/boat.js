@@ -4,19 +4,14 @@ import { VESSEL_SPECS } from './vessels.js';
 import { VesselAnimationRig } from './vessel-animations.js';
 
 const G = 9.81;
-// Diagnostic visuel volontairement activable par URL : les masques gardent
-// exactement leur géométrie et leur écriture de profondeur, mais deviennent
-// vert fluo afin de révéler immédiatement tout débordement hors de la coque.
 const DEBUG_WATER_MASK = new URLSearchParams(window.location.search).has('masks');
 
-// Réglages du modèle GLB (à ajuster selon l'asset, ici le Zefiro)
 const MODEL_TWEAK = {
-  yawOffset: 0,      // rotation Y additionnelle si la proue ne pointe pas +Z
-  yOffset: -0.5,     // point le plus bas de la coque sous la flottaison
-  targetLength: 6.5, // longueur normalisée (m)
+  yawOffset: 0,
+  yOffset: -0.5,
+  targetLength: 6.5,
 };
 
-// Cap de secours tant que la scène n'en fournit pas un (face à la houle).
 const PRIMARY_SWELL = new THREE.Vector2(1, 0.18).normalize();
 const FALLBACK_START_YAW = Math.atan2(-PRIMARY_SWELL.x, -PRIMARY_SWELL.y);
 
@@ -29,14 +24,11 @@ function disposeObject(root) {
   });
 }
 
-// Sur mobile/tactile, certains GLB embarquent des textures 4096² (jusqu'à 3 à 8
-// par modèle). Décodées en RGBA elles pèsent 64 Mo pièce : la VRAM sature au
-// chargement → perte de contexte WebGL et rechargement/plantage de l'onglet.
-// On plafonne donc leur taille AVANT l'envoi au GPU (aucune incidence desktop).
 const MAX_TEXTURE = (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) ? 1024 : Infinity;
 const TEXTURE_SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap',
   'aoMap', 'emissiveMap', 'bumpMap', 'alphaMap', 'specularMap'];
 
+// Downscale decoded mobile textures before GPU upload to avoid transient WebGL OOMs.
 function capTextureSize(tex, cache) {
   if (!tex || !tex.image) return;
   const img = tex.image;
@@ -51,12 +43,12 @@ function capTextureSize(tex, cache) {
   cache.set(img, cv);
   tex.image = cv;
   tex.needsUpdate = true;
-  if (img.close) img.close(); // libère l'ImageBitmap 4k décodé (mémoire CPU)
+  if (img.close) img.close();
 }
 
 function capModelTextures(model) {
   if (MAX_TEXTURE === Infinity) return;
-  const cache = new Map(); // images partagées entre matériaux : traitées une fois
+  const cache = new Map();
   model.traverse(o => {
     if (!o.isMesh || !o.material) return;
     (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
@@ -65,15 +57,6 @@ function capModelTextures(model) {
   });
 }
 
-// Certains exports fusionnent dans un même primitive le vrai vitrage et des
-// panneaux de carrosserie déconnectés. Three.js ne peut attribuer qu'un seul
-// matériau au primitive : on recrée donc des groupes de triangles pour rendre
-// opaques uniquement les régions signalées par la fiche du bateau.
-//
-// Une région peut être définie soit par un seul axe (legacy : { axis, min, max }),
-// soit par une boîte 3D (chaque borne facultative) : { x:[min,max], y:[…], z:[…] }.
-// PLUSIEURS régions peuvent viser le même mesh : un triangle devient opaque dès
-// qu'il tombe dans l'une d'elles, avec son propre matériau (couleur/métal/rugosité).
 function centroidInRegion(r, cx, cy, cz) {
   if (r.axis) {
     const c = r.axis === 'x' ? cx : r.axis === 'y' ? cy : cz;
@@ -102,6 +85,8 @@ function makeSolidFromGlass(glass, r) {
 }
 
 function repairOpaqueMaterialRegions(model, repairs = []) {
+  // Some exports merge disconnected glass and body panels into one primitive.
+  // Geometry groups let the configured body regions use an opaque material.
   if (!repairs.length) return;
   model.traverse(o => {
     if (!o.isMesh || !o.geometry?.attributes.position || !o.material) return;
@@ -110,7 +95,6 @@ function repairOpaqueMaterialRegions(model, repairs = []) {
       && (!r.mesh || r.mesh === o.name));
     if (!matching.length) return;
 
-    // capot plein sans aucun vrai vitrage : tout le mesh devient opaque
     const allRule = matching.find(r => r.all);
     if (allRule) { o.material = makeSolidFromGlass(o.material, allRule); return; }
 
@@ -119,7 +103,6 @@ function repairOpaqueMaterialRegions(model, repairs = []) {
     const index = geo.index;
     const elementCount = index ? index.count : pos.count;
     const coord = (i, c) => pos.getComponent(i, c);
-    // 0 = vitrage conservé, sinon 1..N = indice de la région opaque correspondante
     const regionOf = offset => {
       const a = index ? index.getX(offset) : offset;
       const b = index ? index.getX(offset + 1) : offset + 1;
@@ -169,22 +152,20 @@ export class Boat {
     this.angVelB = new THREE.Vector3();
 
     this.throttle = 0;
-    this.steer = 0; // +1 = virage à gauche
+    this.steer = 0;
     this.propWet = 1;
-    this.wet = 1; // fraction immergée de la coque (pour le rendu du sillage)
+    this.wet = 1;
     this.speedKn = 0;
-    this.slam = 0; // intensité d'impact (pour les embruns)
+    this.slam = 0;
     this.slamSpeed = 0;
     this.slamPoint = new THREE.Vector3();
     this.slamNormal = new THREE.Vector3(0, 1, 0);
 
     this.group = new THREE.Group();
     scene.add(this.group);
-    // masque d'occlusion: volume de coque écrit dans le depth buffer avant
-    // l'océan -> la surface d'eau n'est plus visible à l'intérieur du bateau
     this.waterMask = buildWaterMask();
     this.group.add(this.waterMask);
-    this._maskWanted = false; // coque assez grande + contour trouvé (cf. _load)
+    this._maskWanted = false;
 
     this._accum = 0;
     this._fwd = new THREE.Vector3();
@@ -207,21 +188,17 @@ export class Boat {
     this.reset();
   }
 
-  // Sur tactile, préfère la variante allégée (textures ≤1024²) si elle existe :
-  // les GLB à textures 4096² décodent en pleine résolution AVANT le plafonnement
-  // runtime (jusqu'à 512 Mo transitoires) → plantage mobile. La variante évite
-  // ce pic ; repli sur le modèle complet si aucune variante n'est publiée.
   async _resolveModelUrl(url) {
+    // Prefer pre-optimized mobile assets because runtime resizing happens after decode.
     if (MAX_TEXTURE === Infinity || !url.includes('/assets/boats/')) return url;
     const mobileUrl = url.replace('/assets/boats/', '/assets/boats-mobile/');
     try {
       const res = await fetch(mobileUrl, { method: 'HEAD' });
       if (res.ok) return mobileUrl;
-    } catch { /* réseau indispo → modèle complet */ }
+    } catch {  }
     return url;
   }
 
-  // charge/remplace le modèle à chaud (sélecteur de bateaux)
   async loadModel(url, targetLength = MODEL_TWEAK.targetLength,
                   reversed = false) {
     const loadId = ++this._loadId;
@@ -232,14 +209,13 @@ export class Boat {
         disposeObject(model);
         return;
       }
-      // retire lumières/caméras embarquées dans le GLB (Google Blocks)
       const strip = [];
       model.traverse(o => { if (o.isLight || o.isCamera) strip.push(o); });
       strip.forEach(o => o.removeFromParent());
       let box = new THREE.Box3().setFromObject(model);
       let size = box.getSize(new THREE.Vector3());
-      if (size.x > size.z) model.rotation.y = Math.PI / 2; // axe long -> Z
-      if (reversed) model.rotation.y += Math.PI; // proue/poupe inversées
+      if (size.x > size.z) model.rotation.y = Math.PI / 2;
+      if (reversed) model.rotation.y += Math.PI;
       model.rotation.y += MODEL_TWEAK.yawOffset;
       model.updateMatrixWorld(true);
       box = new THREE.Box3().setFromObject(model);
@@ -251,14 +227,9 @@ export class Boat {
       const center = box.getCenter(new THREE.Vector3());
       model.position.x -= center.x;
       model.position.z -= center.z;
-      // tirant d'eau visuel proportionnel à la taille (~8 % de la longueur):
-      // un yacht s'enfonce plus qu'un jet-ski
       model.position.y += -this.spec.visualDraft - box.min.y;
-      // matériaux specular-glossiness (extension legacy non supportée par
-      // three): on restaure au moins la couleur diffuse depuis le JSON
       const jmats = (gltf.parser.json && gltf.parser.json.materials) || [];
       const assoc = gltf.parser.associations;
-      // matériaux du modèle conservés, mais bornés (anti-éblouissement)
       model.traverse(o => {
         if (o.isMesh && o.material) {
           const m = o.material;
@@ -283,30 +254,23 @@ export class Boat {
           if (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) > 0) {
             m.emissive.multiplyScalar(0.15);
           }
-          // remplacement de teinte par nom de matériau (ex: sellerie/cuir)
           const override = this.spec.materialColors?.[m.name];
           if (override !== undefined && m.color) m.color.setHex(override);
           o.castShadow = true;
-          o.layers.enable(1); // passes réflexion/réfraction
+          o.layers.enable(1);
         }
       });
       repairOpaqueMaterialRegions(model, this.spec.materialRepairs);
-      // mobile : réduit les textures 4k avant l'upload GPU (anti-OOM)
       capModelTextures(model);
-      // masque anti-eau et hors-bord mis à l'échelle de la coque réelle
       const nsize = new THREE.Box3().setFromObject(model)
         .getSize(new THREE.Vector3());
       const len = Math.max(nsize.x, nsize.z);
-      // masque anti-eau EN FORME DE COQUE: enveloppe convexe des sommets du
-      // modèle autour de la flottaison, rétrécie de 18 % pour rester
-      // strictement à l'intérieur. Désactivé pour les petits engins fermés.
-      // Ne jamais afficher la geometrie rectangulaire d'initialisation. Elle
-      // sert uniquement de conteneur avant le premier chargement: si aucun
-      // contour fiable n'est trouve, mieux vaut ne pas masquer l'eau du tout.
       const wantsWaterMask = len >= 4.5;
       this._maskWanted = false;
       this.waterMask.visible = false;
       if (wantsWaterMask) {
+        // Build a depth-only hull inset from the waterline vertices so ocean pixels
+        // cannot appear inside open cockpits without cutting a hole around the hull.
         const m4 = new THREE.Matrix4();
         const v = new THREE.Vector3();
         const pts = [];
@@ -326,9 +290,6 @@ export class Boat {
           let cx = 0, cz = 0;
           hull.forEach(p => { cx += p.x; cz += p.z; });
           cx /= hull.length; cz /= hull.length;
-          // rétrécissement anisotrope: fort en largeur (la carène en V
-          // s'affine sous la flottaison), faible en longueur (couverture
-          // du cockpit proue-poupe)
           const mask = this.spec.waterMask || {};
           const beamScale = mask.beamScale ?? 0.6;
           const bowScale = mask.bowScale ?? 0.86;
@@ -359,8 +320,8 @@ export class Boat {
       this.visualRig = new VesselAnimationRig(model, this.spec);
     } catch (e) {
       if (loadId !== this._loadId) return;
-      console.warn(url + ' indisponible', e);
-      if (!this.model) { // coque procédurale seulement si rien à afficher
+      console.warn(url + ' unavailable', e);
+      if (!this.model) {
         const fb = buildFallbackBoat();
         fb.traverse(o => {
           if (o.isMesh) { o.castShadow = true; o.layers.enable(1); }
@@ -435,7 +396,6 @@ export class Boat {
     if (steps === this.physicsMaxSteps) this._accum = Math.min(this._accum, h);
     if (this.visualRig) this.visualRig.update(frameDt, this);
 
-    // retourné depuis > 2,5 s: redressement (on garde le cap)
     const upY = this._up.set(0, 1, 0).applyQuaternion(this.quat).y;
     this._invTime = upY < 0.15 ? (this._invTime || 0) + frameDt : 0;
     if (this._invTime > 2.5) {
@@ -448,9 +408,6 @@ export class Boat {
     }
     this.group.position.copy(this.pos);
     this.group.quaternion.copy(this.quat);
-    // masque d'occlusion de l'eau: n'a de sens que si la coque touche la
-    // flottaison. Bateau en l'air (wet == 0) -> on le cache, sinon il découpe
-    // un contour de coque dans l'eau sous le bateau pendant les sauts.
     this.waterMask.visible = this._maskWanted && this.wet > 0;
     this.wf.velocityAt(this.pos.x, this.pos.z, this._waterVel);
     this._relVel.copy(this.vel).sub(this._waterVel);
@@ -468,16 +425,13 @@ export class Boat {
     const up = this._up.set(0, 1, 0).applyQuaternion(this.quat);
     const omegaW = this._omegaW.copy(this.angVelB).applyQuaternion(this.quat);
 
-    // Toutes les forces hydrodynamiques utilisent la vitesse relative à l'eau,
-    // y compris son mouvement orbital horizontal sous la houle.
     this.wf.velocityAt(this.pos.x, this.pos.z, s[8]);
     const relCenter = s[9].copy(this.vel).sub(s[8]);
     const vLong = relCenter.dot(fwd);
     const vLat = relCenter.dot(right);
     const vVert = relCenter.dot(up);
 
-    // ---- flottabilité + amortissement, par point de coque ----
-    let wet = 0; // fraction immergée de la coque (0..1)
+    let wet = 0;
     for (const bp of S.buoyPoints) {
       const wp = this.worldPoint(bp.p, s[0]);
       const depth = this.wf.heightAt(wp.x, wp.z) - wp.y;
@@ -499,8 +453,6 @@ export class Boat {
       if (relNormal < -2.4) {
         const impactSpeed = -relNormal;
         this.slam = Math.min(this.slam + 0.45, 2);
-        // Plusieurs points peuvent toucher pendant le même pas graphique.
-        // On garde le contact le plus violent jusqu'à consommation par les FX.
         if (impactSpeed > this.slamSpeed) {
           this.slamSpeed = impactSpeed;
           this.slamPoint.set(wp.x, this.wf.heightAt(wp.x, wp.z), wp.z);
@@ -508,7 +460,7 @@ export class Boat {
         }
       }
       let fN = bp.w * (S.mass * G * d - S.heaveDamp * relNormal * slamming);
-      fN = Math.max(fN, -0.3 * bp.w * S.mass * G); // succion limitée
+      fN = Math.max(fN, -0.3 * bp.w * S.mass * G);
       const Fn = s[7].copy(hydroNormal).multiplyScalar(fN);
       F.add(Fn);
       tauW.add(s[2].crossVectors(r, Fn));
@@ -516,14 +468,12 @@ export class Boat {
 
     this.wet = wet;
 
-    // ---- propulsion vectorielle (hors-bord) ----
     const speed = Math.hypot(relCenter.x, relCenter.y, relCenter.z);
     const effSteer = this.steer * S.maxSteerRad / (1 + speed * 0.045);
     this._effSteer = effSteer;
     const propW = this.worldPoint(S.propPos, s[0]);
     const propDepth = this.wf.heightAt(propW.x, propW.z) - propW.y;
     this.propWet = THREE.MathUtils.smoothstep(propDepth, 0, 0.25);
-    // coupe-circuit: le moteur coupe au-delà de ~60 degrés de gîte
     const heelCut = THREE.MathUtils.smoothstep(up.y, 0.25, 0.6);
     const advanceRatio = THREE.MathUtils.clamp(
       1 - 0.38 * Math.abs(vLong) / S.maxPropSpeed, 0.58, 1);
@@ -537,7 +487,6 @@ export class Boat {
       tauW.add(s[2].crossVectors(s[3].copy(propW).sub(this.pos), Ft));
     }
 
-    // ---- barre passive (safran/embase dans le flux) ----
     if (Math.abs(vLong) > 0.5) {
       const fRud = Math.sin(effSteer) * S.rudderLift * vLong * Math.abs(vLong)
                    * Math.max(this.propWet, wet);
@@ -546,9 +495,7 @@ export class Boat {
       tauW.add(s[2].crossVectors(this.worldPoint(S.propPos, s[3]).sub(this.pos), Fr));
     }
 
-    // ---- traînées (uniquement la partie immergée; résidu aérodynamique) ----
     const wetDrag = 0.12 + 0.88 * wet;
-    // tableau arrière non profilé: traînée majorée en marche arrière
     const revPenalty = vLong < 0 ? 2.6 : 1.0;
     F.addScaledVector(fwd, -(S.dragLong[0] * vLong + S.dragLong[1] * vLong * Math.abs(vLong)) * wetDrag * revPenalty);
     const fLat = -(S.dragLat[0] * vLat + S.dragLat[1] * vLat * Math.abs(vLat)) * wetDrag;
@@ -557,7 +504,6 @@ export class Boat {
     tauW.add(s[2].crossVectors(this.worldPoint(S.latDragPos, s[3]).sub(this.pos), FlatV));
     F.addScaledVector(up, -S.dragVert * vVert * wetDrag);
 
-    // ---- portance de déjaugeage (nulle hors de l'eau) ----
     if (vLong > 2 && wet > 0) {
       const lift = Math.min(S.planingLift * vLong * vLong, S.planingLiftMax * S.mass * G) * wet;
       const Fl = s[1].set(0, lift, 0);
@@ -568,27 +514,23 @@ export class Boat {
       tauW.add(s[2].crossVectors(this.worldPoint(cp, s[3]).sub(this.pos), Fl));
     }
 
-    // ---- couples explicites (repère local) ----
     tauB.y -= (S.yawDamp[0] + S.yawDamp[1] * Math.abs(vLong)
                + S.yawDamp[2] * Math.abs(this.angVelB.y)) * this.angVelB.y;
     tauB.x -= S.pitchRollDamp[0] * this.angVelB.x;
     tauB.z -= S.pitchRollDamp[1] * this.angVelB.z;
-    // gîte dans le virage, plafonnée
     tauB.z -= THREE.MathUtils.clamp(
       S.bankGain * this.angVelB.y * vLong, -S.bankMax, S.bankMax);
-    // rappel de roulis non linéaire: right.y ~ sin(roulis), raidit avec la gîte
     tauB.z -= S.rollStiff * right.y * (1 + 2.5 * Math.abs(right.y))
               * (0.35 + 0.65 * Math.min(wet, 1));
 
-    // conversion couple monde -> local puis intégration
     this._qi.copy(this.quat).invert();
     tauB.add(tauW.applyQuaternion(this._qi));
-    // Terme gyroscopique du corps rigide diagonal: tau = I*w' + w x Iw.
     const iOmega = s[4].set(
       S.inertia.x * this.angVelB.x,
       S.inertia.y * this.angVelB.y,
       S.inertia.z * this.angVelB.z,
     );
+    // Diagonal rigid-body dynamics: tau = I * omega' + omega x (I * omega).
     tauB.sub(s[5].crossVectors(this.angVelB, iOmega));
 
     this.vel.addScaledVector(F, h / S.mass);
@@ -606,7 +548,6 @@ export class Boat {
   }
 }
 
-// Enveloppe convexe 2D (monotone chain) de points {x, z}
 function convexHull2D(pts) {
   const s = pts.slice().sort((a, b) => a.x - b.x || a.z - b.z);
   const cross = (o, a, b) =>
@@ -632,9 +573,6 @@ function convexHull2D(pts) {
   return lower.concat(upper);
 }
 
-// Coupe l'extrémité arrière (Z négatif) d'un polygone convexe par une droite
-// transversale. Les deux intersections deviennent les coins francs du tableau
-// arrière, au lieu de conserver une poupe arrondie ou pointue.
 function clipPolygonAtStern(poly, minZ) {
   const out = [];
   for (let i = 0; i < poly.length; i++) {
@@ -648,9 +586,6 @@ function clipPolygonAtStern(poly, minZ) {
   return out.length >= 3 ? out : poly;
 }
 
-// Prisme fermé bâti sur un polygone convexe (masque forme de coque). Les
-// remontées optionnelles permettent de suivre la tonture d'une étrave/poupe au
-// lieu d'imposer un volume parfaitement horizontal sur toute la longueur.
 function prismGeometry(poly, y0, y1, { bowRise = 0, sternRise = 0 } = {}) {
   const verts = [];
   const n = poly.length;
@@ -672,21 +607,17 @@ function prismGeometry(poly, y0, y1, { bowRise = 0, sternRise = 0 } = {}) {
   for (let i = 0; i < n; i++) {
     const a = poly[i], b = poly[(i + 1) % n];
     const ar = riseAt(a), br = riseAt(b);
-    push(a, y0 + ar); push(b, y0 + br); push(a, y1 + ar); // flanc
+    push(a, y0 + ar); push(b, y0 + br); push(a, y1 + ar);
     push(b, y0 + br); push(b, y1 + br); push(a, y1 + ar);
-    push(center, y1); push(a, y1 + ar); push(b, y1 + br); // capot haut
-    push(center, y0); push(b, y0 + br); push(a, y0 + ar); // capot bas
+    push(center, y1); push(a, y1 + ar); push(b, y1 + br);
+    push(center, y0); push(b, y0 + br); push(a, y0 + ar);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   return g;
 }
 
-// Volume de coque invisible, profondeur seule (anti eau-dans-le-cockpit)
 function buildWaterMask() {
-  // doit rester strictement DANS la coque: s'il déborde sous l'eau il perce
-  // un trou dans la surface (ciel visible entre coque et eau).
-  // Peu profond: juste la zone où la surface peut affleurer l'intérieur.
   const geo = new THREE.BoxGeometry(1.55, 0.6, 4.95, 1, 1, 10);
   const p = geo.attributes.position;
   for (let i = 0; i < p.count; i++) {
@@ -697,18 +628,17 @@ function buildWaterMask() {
   const mat = new THREE.MeshBasicMaterial({
     color: DEBUG_WATER_MASK ? 0x39ff14 : 0xffffff,
     colorWrite: DEBUG_WATER_MASK,
-    side: THREE.DoubleSide, // le prisme convexe n'a pas de winding garanti
+    side: THREE.DoubleSide,
     toneMapped: false,
     fog: !DEBUG_WATER_MASK,
   });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = DEBUG_WATER_MASK ? 'water-mask-debug' : 'water-mask';
-  mesh.position.y = 0.12; // couvre ~[-0.18, +0.42]
-  mesh.renderOrder = 1; // après bateau et ciel, avant l'océan (renderOrder 2)
+  mesh.position.y = 0.12;
+  mesh.renderOrder = 1;
   return mesh;
 }
 
-// Coque procédurale de secours (si boat.glb absent)
 function buildFallbackBoat() {
   const g = new THREE.Group();
   const white = new THREE.MeshPhysicalMaterial({ color: 0xf4f5f2, roughness: 0.25, clearcoat: 0.8 });
@@ -717,15 +647,14 @@ function buildFallbackBoat() {
     color: 0x9fc4d8, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.35,
   });
 
-  // coque effilée vers la proue, fond en V
   const hullGeo = new THREE.BoxGeometry(1.95, 0.85, 5.4, 1, 1, 12);
   const p = hullGeo.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    const t = Math.max(0, z / 2.7);            // 0 au milieu -> 1 à la proue
-    let nx = x * (1 - 0.72 * t * t);           // effilement
-    let ny = y + 0.32 * t * t;                 // relevé d'étrave
-    if (y < 0) ny += Math.abs(nx) * 0.18;      // fond en V
+    const t = Math.max(0, z / 2.7);
+    let nx = x * (1 - 0.72 * t * t);
+    let ny = y + 0.32 * t * t;
+    if (y < 0) ny += Math.abs(nx) * 0.18;
     p.setXYZ(i, nx, ny, z);
   }
   hullGeo.computeVertexNormals();
@@ -750,5 +679,5 @@ function buildFallbackBoat() {
   seat.position.set(0, 0.6, -0.5);
   g.add(seat);
 
-  return g; // le hors-bord articulé est ajouté séparément
+  return g;
 }

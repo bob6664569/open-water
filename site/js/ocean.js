@@ -1,13 +1,7 @@
 import * as THREE from 'three';
 
-// Océan: MeshPhysicalMaterial étendu par onBeforeCompile, en DEUX maillages
-// partageant les mêmes uniforms:
-//  - "far": 2200 m / 768 segments (~2,9 m par cellule)
-//  - "patch": 92 m / 320 segments (~0,29 m) qui suit le bateau, pour la vague
-//    d'étrave, le creux de coque et le sillage proche.
-// Raccord sans z-fight: le far plonge sous le patch au centre, le patch plonge
-// sous le far à sa périphérie (jupes croisées, cachées par la surface opaque).
-
+// A coarse far mesh and a boat-following fine patch share uniforms. Their crossed
+// skirts hide overlap z-fighting while preserving detailed near-field displacement.
 const FAR_SIZE = 2200;
 const FAR_SEGS = 768;
 const PATCH_SIZE = 92;
@@ -31,8 +25,6 @@ const NOISE_GLSL = /* glsl */`
   }
 `;
 
-// Normal map d'eau tuilée générée par bruit périodique (mips + anisotropie).
-// 1024 px évitent la magnification visible à caméra basse sur la tuile de 27 m.
 function makeWaterNormalTexture(size = 1024) {
   const lat = (n, seed) => {
     const g = new Float32Array(n * n);
@@ -63,8 +55,6 @@ function makeWaterNormalTexture(size = 1024) {
     }
   }
   const data = new Uint8Array(size * size * 4);
-  // La différence entre texels diminue avec la résolution: ce facteur conserve
-  // la même pente apparente qu'à 256 px au lieu d'aplatir la normal map.
   const S = 5.5 * (size / 256);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -96,8 +86,6 @@ function makeEmptyTexture() {
   return t;
 }
 
-// dentelle d'écume: cellules sombres (eau qui transparaît) + points brillants,
-// tuilée, donne le grain granuleux des photos au lieu d'un blanc cotonneux
 function makeFoamLaceTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -111,7 +99,6 @@ function makeFoamLaceTexture() {
     g.addColorStop(0, col);
     g.addColorStop(1, col.replace(/[\d.]+\)$/, '0)'));
     ctx.fillStyle = g;
-    // tuilage: dessine aussi les répliques débordantes
     for (const ox of [-256, 0, 256]) {
       for (const oy of [-256, 0, 256]) {
         ctx.beginPath(); ctx.arc(x + ox, y + oy, r, 0, 7); ctx.fill();
@@ -142,15 +129,14 @@ export class Ocean {
       uWaveAmps: { value: u.amps },
       uSteepSum: { value: waveField.steepnessSum() },
       uNormalTex: { value: makeWaterNormalTexture() },
-      uBoat: { value: new THREE.Vector4(0, 0, 0, 1) }, // x, z, fwd.x, fwd.z
+      uBoat: { value: new THREE.Vector4(0, 0, 0, 1) },
       uBoatSpeed: { value: 0 },
       uBoatFroude: { value: 0 },
       uBoatWet: { value: 1 },
       uBoatSize: { value: new THREE.Vector2(6.5, 2.35) },
-      uBoatY: { value: 0 }, // flottaison du bateau (monde), pour l'écume de contact
+      uBoatY: { value: 0 },
       uPatchCenter: { value: new THREE.Vector2() },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-      // réflexion planaire (bateau) + réfraction écran (coque immergée)
       uReflMap: { value: makeEmptyTexture() },
       uReflMatrix: { value: new THREE.Matrix4() },
       uRefrMap: { value: makeEmptyTexture() },
@@ -162,8 +148,6 @@ export class Ocean {
       uFoamTrail: { value: makeEmptyTexture() },
       uTrailCenter: { value: new THREE.Vector2() },
       uTrailSize: { value: 150 },
-      // feux de navigation: éclairage coloré de la surface (la vraie surface
-      // ondulée, cf. vOWorldPos). xy = position monde, z = rayon, w = intensité
       uNavCount: { value: 0 },
       uNav: {
         value: [new THREE.Vector4(), new THREE.Vector4(),
@@ -184,9 +168,9 @@ export class Ocean {
     this.mesh = new THREE.Mesh(farGeo, this._makeMaterial(false));
     this.patch = new THREE.Mesh(patchGeo, this._makeMaterial(true));
     for (const m of [this.mesh, this.patch]) {
-      m.renderOrder = 2; // après le masque d'occlusion de la coque
+      m.renderOrder = 2;
       m.frustumCulled = false;
-      m.receiveShadow = true; // ombre portée du bateau
+      m.receiveShadow = true;
     }
 
     this.farSegments = farSegments;
@@ -222,9 +206,7 @@ export class Ocean {
       color: new THREE.Color(0x07293f),
       roughness: 0.15,
       metalness: 0.0,
-      ior: 1.33, // eau réelle (adoucit le fresnel rasant vs 1.5 par défaut)
-      // bas: le voile laiteux vient de l'IBL (horizon blanc réfléchi partout);
-      // le glitter du soleil vient du directional et reste intact
+      ior: 1.33,
       envMapIntensity: 0.5,
     });
 
@@ -232,9 +214,9 @@ export class Ocean {
       WAVE_COUNT: this._waveCount,
       WAVE_VTX: isPatch ? this._waveCount
                         : Math.min(FAR_VTX_WAVES, this._waveCount),
-      WAVE_NRM: 2, // normales des 2 grandes houles au vertex, le reste par pixel
+      WAVE_NRM: 2,
       IS_PATCH: isPatch ? 1 : 0,
-      NAV_MAX: 4, // nb max de feux de navigation éclairant l'eau
+      NAV_MAX: 4,
     };
 
     mat.onBeforeCompile = (shader) => {
@@ -261,7 +243,7 @@ export class Ocean {
           ${NOISE_GLSL}
         `)
         .replace('#include <beginnormal_vertex>', /* glsl */`
-          // position monde XZ via la modelMatrix (translation seule)
+
           vec2 gXZ = (modelMatrix * vec4(position, 1.0)).xz;
           vec3 gDisp = vec3(0.0);
           vec3 gN = vec3(0.0, 1.0, 0.0);
@@ -283,44 +265,37 @@ export class Ocean {
             gSteep += aq.y * ka * max(s, 0.0);
           }
 
-          // déplacement d'eau par la coque: creux d'Archimède permanent,
-          // vague d'étrave, sillage en V (résolus par le patch fin)
           {
             vec2 rel = gXZ - uBoat.xy;
             float along = dot(rel, uBoat.zw);
             float lat = dot(rel, vec2(-uBoat.w, uBoat.z));
             float hullL = max(uBoatSize.x, 1.0);
             float hullB = max(uBoatSize.y, 0.6);
-            // module par l'immersion: un bateau en l'air ne déplace pas d'eau.
-            // contact = 0 dès que la coque quitte la flottaison (wet -> 0): coupe
-            // net le creux/collerette qui, sinon, suivaient le bateau en plein saut
-            // (les mix(0.25/0.3,..) ont un plancher qui ne retombe jamais à 0).
-            // Seuil bas (0.04): comportement inchangé dès que la coque touche
-            // l'eau, y compris au planing où le tableau reste mouillé.
+
+            // Remove hull displacement completely while airborne.
             float contact = smoothstep(0.0, 0.04, uBoatWet);
             float spf = clamp((uBoatFroude - 0.12) / 0.85, 0.0, 1.3)
                         * mix(0.25, 1.0, uBoatWet) * contact;
             float wetF = mix(0.3, 1.0, uBoatWet) * contact;
-            // creux sous la coque, présent même à l'arrêt
+
             float hull = -(0.025 * hullL + 0.055 * hullB * spf) * wetF
               * exp(-(pow(along / (0.42 * hullL), 2.0)
                     + pow(lat / (0.48 * hullB), 2.0)));
-            // bourrelet d'étrave en DEUX lobes latéraux (l'eau fend, pas de dôme)
+
             float bowSide = (0.025 * hullB + 0.11 * hullB * spf) * wetF
               * exp(-(pow((along - 0.36 * hullL) / (0.18 * hullL), 2.0)
                       + pow((abs(lat) - 0.48 * hullB) / (0.3 * hullB), 2.0)));
             float behind = -(along + 0.43 * hullL);
             float wk = 0.0;
             if (behind > 0.0 && uBoatSpeed > 1.0) {
-              // tapis plat du jet d'hélice: LÉGER AFFAISSEMENT qui s'élargit,
-              // très écumeux (cf. photo réf.), pas de dôme au tableau
+
               float washHalf = 0.34 * hullB + behind * 0.11;
               float washW = exp(-pow(lat / washHalf, 2.0)) * exp(-behind / 15.0);
               wk -= 0.04 * hullB * spf * washW * exp(-behind * 0.2);
               float turb = ob_vnoise(vec2(behind * 0.7 - uTime * 2.6, lat * 1.1))
                            - 0.5;
               wk += turb * 0.035 * hullB * spf * washW;
-              // bras divergents: n'apparaissent qu'en s'éloignant du tableau
+
               float grow = smoothstep(1.0, 7.0, behind);
               float wakeSlope = mix(0.34, 0.2, smoothstep(0.5, 1.5, uBoatFroude));
               float arm = abs(abs(lat) - 0.42 * hullB - behind * wakeSlope);
@@ -331,7 +306,7 @@ export class Ocean {
               gSteep += washW * spf * 0.105 * exp(-behind / (1.6 * hullL))
                       + amp * exp(-pow(arm / max(0.32 * hullB, 0.4), 2.0)) * 0.03;
             }
-            // collerette d'écume à la flottaison (masque coque/vague)
+
             float ring = exp(-pow((abs(lat) - 0.46 * hullB)
                                    / max(0.18 * hullB, 0.22), 2.0))
                        * (1.0 - smoothstep(0.4 * hullL, 0.54 * hullL,
@@ -340,7 +315,6 @@ export class Ocean {
             gDisp.y += hull + bowSide + wk;
           }
 
-          // jupes croisées far/patch (cache le z-fight de recouvrement)
           {
             float pd = distance(gXZ, uPatchCenter);
             #if IS_PATCH == 1
@@ -354,8 +328,7 @@ export class Ocean {
           vElev = gDisp.y;
           vOWorldPos = vec3(gXZ.x + gDisp.x, gDisp.y, gXZ.y + gDisp.z);
           vReflCoord = uReflMatrix * vec4(vOWorldPos, 1.0);
-          // atténue légèrement les normales au loin (les houles 62/31 m restent
-          // bien échantillonnées, le reflet du ciel doit continuer d'onduler)
+
           float gVd = distance(cameraPosition, vOWorldPos);
           gN.xz *= 1.0 - 0.45 * smoothstep(80.0, 500.0, gVd);
           vec3 objectNormal = normalize(gN);
@@ -409,7 +382,7 @@ export class Ocean {
             float camDist = length(vOWorldPos - cameraPosition);
             float rippleFade = 1.0 - smoothstep(60.0, 320.0, camDist);
             vec3 rN = vec3(0.0);
-            // petites vagues du spectre, par pixel (anti-moiré)
+
             for (int i = WAVE_NRM; i < WAVE_COUNT; i++) {
               vec4 d = uWaveDirs[i];
               vec3 aq = uWaveAmps[i];
@@ -419,7 +392,7 @@ export class Ocean {
               rN.x -= d.x * ka;
               rN.z -= d.y * ka;
             }
-            // micro-ripples: normal map tuilée, 2 couches décorrélées.
+
             vec2 s1 = texture2D(uNormalTex, vOWorldPos.xz * 0.037
                         + vec2(uTime * 0.011, uTime * 0.006)).xy * 2.0 - 1.0;
             vec2 rot = vec2(vOWorldPos.z, -vOWorldPos.x);
@@ -435,18 +408,13 @@ export class Ocean {
         .replace('#include <color_fragment>', /* glsl */`
           #include <color_fragment>
           {
-            // ambiance pilotée par l'état de mer en TROIS temps: lagon turquoise
-            // "paradis" réservé au calme, bleu océanique classique dès qu'on monte
-            // un peu (Roll/Rough), bleu-gris ardoise terne en tempête. uSeaState =
-            // Hs/1,5 va de ~0,23 (Calm) à ~3,47 (Stormy). La rampe storm est calée
-            // sur celle de l'atmosphère (main.js) pour que l'eau et le ciel
-            // ternissent ensemble; le turquoise, lui, s'efface avant même Roll.
-            // NB: en GLSL smoothstep prend x en DERNIER (contra THREE.MathUtils).
-            float paradise = 1.0 - smoothstep(0.3, 0.6, uSeaState); // 1=Calm, 0 dès Roll
-            float storm    = smoothstep(0.6, 3.45, uSeaState);      // 0=Roll, 1=Stormy
-            vec3 calmWater  = vec3(0.03, 0.34, 0.44); // lagon tropical
-            vec3 oceanWater = vec3(0.02, 0.22, 0.40); // bleu océan classique
-            vec3 stormWater = vec3(0.05, 0.12, 0.16); // ardoise désaturée
+
+            // GLSL smoothstep takes x as its final argument.
+            float paradise = 1.0 - smoothstep(0.3, 0.6, uSeaState);
+            float storm    = smoothstep(0.6, 3.45, uSeaState);
+            vec3 calmWater  = vec3(0.03, 0.34, 0.44);
+            vec3 oceanWater = vec3(0.02, 0.22, 0.40);
+            vec3 stormWater = vec3(0.05, 0.12, 0.16);
             vec3 water = mix(oceanWater, calmWater, paradise);
             water = mix(water, stormWater, storm);
             diffuseColor.rgb = water;
@@ -454,12 +422,12 @@ export class Ocean {
             float cDist = length(vOWorldPos - cameraPosition);
             float crest = smoothstep(0.15, 1.6, vElev)
               * (1.0 - smoothstep(150.0, 400.0, cDist));
-            // crêtes: turquoise lumineux au calme -> teal océanique -> gris terne
+
             vec3 crestTint = mix(vec3(0.06, 0.33, 0.42), vec3(0.10, 0.52, 0.55), paradise);
             crestTint = mix(crestTint, vec3(0.20, 0.26, 0.29), storm);
             diffuseColor.rgb = mix(diffuseColor.rgb, crestTint,
                                    crest * mix(0.42, 0.22, storm));
-            // écume de crête (moutons)
+
             float n = ob_fbm(vOWorldPos.xz * 0.45 + vec2(uTime * 0.15, -uTime * 0.1));
             float nFoam = vFoam / uSteepSum;
             float seaFoamGain = mix(0.58, 1.38,
@@ -467,18 +435,17 @@ export class Ocean {
             float baseFoam = smoothstep(0.46, 0.82,
               nFoam * (0.35 + 0.65 * n) * seaFoamGain);
             baseFoam *= 1.0 - smoothstep(80.0, 300.0, cDist);
-            // traînée persistante peinte par le bateau
+
             vec2 tUV = (vOWorldPos.xz - uTrailCenter) / uTrailSize + 0.5;
             float edge = 1.0 - smoothstep(0.42, 0.5,
               max(abs(tUV.x - 0.5), abs(tUV.y - 0.5)));
             float trail = texture2D(uFoamTrail, tUV).r * edge;
-            // dentelle isotrope (moutons de crête)
+
             float lace = texture2D(uFoamTex, vOWorldPos.xz * 0.31).r * 0.62
                        + texture2D(uFoamTex, vOWorldPos.xz * 0.085
                                    + vec2(uTime * 0.004)).r * 0.38;
             float fCrest = smoothstep(0.16, 0.72, baseFoam * (0.25 + 1.05 * lace));
-            // dentelle ANISOTROPE pour le sillage: cellules étirées dans le
-            // sens de la course (filaments, cf. photo réelle)
+
             vec2 relT = vOWorldPos.xz - uBoat.xy;
             vec2 bfT = vec2(dot(relT, uBoat.zw),
                             dot(relT, vec2(-uBoat.w, uBoat.z)));
@@ -486,8 +453,7 @@ export class Ocean {
               vec2(bfT.x * 0.05, bfT.y * 0.27)).r * 0.6
                         + texture2D(uFoamTex,
               vec2(bfT.x * 0.016, bfT.y * 0.1) + vec2(uTime * 0.003)).r * 0.4;
-            // au ralenti: mousse fine isotrope (pas d'écoulement directionnel);
-            // en vitesse: filaments étirés
+
             float laceSlow = texture2D(uFoamTex, vOWorldPos.xz * 0.55).r * 0.6
                            + texture2D(uFoamTex, vOWorldPos.xz * 0.17
                                        + vec2(uTime * 0.006)).r * 0.4;
@@ -495,37 +461,33 @@ export class Ocean {
                                 smoothstep(3.5, 8.0, uBoatSpeed));
             float fTrail = smoothstep(0.02, 0.34,
               trail * (0.12 + 1.05 * laceMix)) * 0.72;
-            // coeur blanc dense contre la coque (lavage frais, non troué)
+
             float solid = smoothstep(0.8, 1.4, nFoam);
             vFoamOut = clamp(max(max(fCrest, fTrail), solid), 0.0, 1.0);
-            // écume de contact / franchissement le long de la coque: sans elle,
-            // la surface d'eau opaque recoupe la coque en une arête nette qui
-            // balaie le bateau en "bloc" quand une crête le dépasse. On foisonne
-            // le raccord (liston) et l'eau qui déferle par-dessus le pont.
+
             {
               vec2 relC   = vOWorldPos.xz - uBoat.xy;
-              float alongC = dot(relC, uBoat.zw);                 // proue-poupe
-              float latC   = dot(relC, vec2(-uBoat.w, uBoat.z));  // travers
+              float alongC = dot(relC, uBoat.zw);
+              float latC   = dot(relC, vec2(-uBoat.w, uBoat.z));
               float halfL = max(uBoatSize.x * 0.5, 1.0);
               float halfB = max(uBoatSize.y * 0.5, 0.4);
-              // distance normalisée à l'empreinte de coque (0 centre, 1 liston)
+
               float fp = length(vec2(alongC / halfL, latC / halfB));
-              // hauteur de CE fragment d'eau au-dessus de la flottaison du bateau
+
               float rise = vOWorldPos.y - uBoatY;
-              // whitewater: deux couches de bruit haute fréquence, animées, qui
-              // TROUENT la nappe -> dentelle brisée au lieu d'un disque cotonneux
+
               float w1 = ob_fbm(vOWorldPos.xz * 2.3 + vec2(uTime * 0.9, uTime * 0.5));
               float w2 = ob_fbm(vOWorldPos.xz * 5.1 - vec2(uTime * 0.6, uTime * 1.1));
               float ww = w1 * 0.6 + w2 * 0.4;
-              // 1) frange au liston (raccord doux, seulement près de la flottaison)
+
               float rimC = exp(-pow((fp - 1.0) / 0.14, 2.0))
                          * (1.0 - smoothstep(0.5, 1.6, abs(rise)));
-              // 2) eau qui passe par-dessus le pont (dans l'empreinte, au-dessus)
+
               float over = smoothstep(0.03, 0.6, rise)
                          * (1.0 - smoothstep(0.85, 1.25, fp));
               float contact = max(rimC * 0.7, over);
-              contact *= smoothstep(0.30, 0.72, ww); // troue la nappe (dentelle)
-              contact = clamp(contact, 0.0, 0.82);   // jamais blanc pur opaque
+              contact *= smoothstep(0.30, 0.72, ww);
+              contact = clamp(contact, 0.0, 0.82);
               vFoamOut = max(vFoamOut, contact);
             }
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.96, 0.97), vFoamOut);
@@ -536,19 +498,17 @@ export class Ocean {
           {
             float camDist = length(vOWorldPos - cameraPosition);
             roughnessFactor = mix(roughnessFactor, 0.45, vFoamOut);
-            // risées de vent: plaques lisses / ridées qui granularisent le reflet
+
             float rn = ob_vnoise(vOWorldPos.xz * 0.11 + vec2(uTime * 0.05, 0.0)) * 0.65
                      + ob_vnoise(vOWorldPos.xz * 0.031) * 0.35;
             roughnessFactor = mix(roughnessFactor, 0.2 + 0.3 * rn,
                                   smoothstep(40.0, 300.0, camDist));
           }
         `)
-        // compression des blancs spéculaires au loin (le fresnel rasant
-        // physique miroite l'horizon clair; on l'écrase comme les jeux le font)
         .replace('#include <opaque_fragment>', /* glsl */`
           #include <opaque_fragment>
           {
-            // réfraction: coque immergée visible à travers l'eau, déformée
+
             vec2 sUV = gl_FragCoord.xy / uResolution;
             vec2 refrUV = sUV + normal.xz * 0.045;
             vec4 refr = texture2D(uRefrMap, refrUV);
@@ -561,17 +521,9 @@ export class Ocean {
             gl_FragColor.rgb = mix(gl_FragColor.rgb,
               refracted * vec3(0.72, 0.9, 0.94) + gl_FragColor.rgb * 0.25,
               refr.a * 0.55 * (1.0 - vFoamOut));
-            // réflexion planaire du bateau: cible floue + forte distorsion
-            // par les vagues, intensité modérée (pas un miroir). La mer formée
-            // la diffuse davantage: ~25 % de moins en Rough, puis ~55 % de
-            // moins en Stormy, avec une transition continue entre les presets.
-            // ATTÉNUÉE quand la caméra pique vers le bas : la texture projective
-            // n'est exacte qu'au niveau du plan d'eau, donc le reflet d'un objet
-            // AU-DESSUS de l'eau (coque, cabine) part décalé, d'autant plus qu'on
-            // regarde verticalement -> vu du dessus il se détachait de la coque
-            // et flottait à distance. Physiquement l'eau ne réfléchit ~rien à
-            // incidence normale : l'effacer droit au-dessus est aussi plus juste.
+
             vec3 reflViewDir = normalize(cameraPosition - vOWorldPos);
+            // Projective reflections become invalid overhead and Fresnel is minimal there.
             float reflFade = 1.0 - smoothstep(0.55, 0.9, reflViewDir.y);
             float roughRefl = smoothstep(0.6, 1.6, uSeaState);
             float stormRefl = smoothstep(1.6, 3.47, uSeaState);
@@ -587,7 +539,7 @@ export class Ocean {
             vec3 viewV = vOWorldPos - cameraPosition;
             float camD = length(viewV);
             float far = smoothstep(18.0, 140.0, camD);
-            // compression renforcée face au soleil (voile de contre-jour)
+
             float facing = pow(clamp(dot(normalize(viewV.xz),
                                          normalize(uSunDir.xz)), 0.0, 1.0), 2.0);
             float lum = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
@@ -598,25 +550,20 @@ export class Ocean {
                                    gl_FragColor.rgb * vec3(0.88, 0.94, 1.0),
                                    far * 0.3);
           }
-          // éclairage coloré des feux de navigation: additif sur la VRAIE
-          // surface (vOWorldPos épouse les vagues), donc la lueur reste posée
-          // sur l'eau au lieu de flotter. Empreinte horizontale (xz) seule:
-          // le feu éclaire l'eau sous lui quelle que soit la houle.
-          vec2 navLat = vec2(-uBoat.w, uBoat.z); // travers du bateau
+
+          vec2 navLat = vec2(-uBoat.w, uBoat.z);
           for (int i = 0; i < NAV_MAX; i++) {
             if (i >= uNavCount) break;
-            vec4 nl = uNav[i];                 // xy=pos, z=rayon, w=intensité
+            vec4 nl = uNav[i];
             float d = length(vOWorldPos.xz - nl.xy);
             float g = nl.w * exp(-(d * d) / max(nl.z * nl.z, 0.25));
-            // secteur bâbord/tribord: chaque feu n'éclaire que SON bord, sinon
-            // rouge + vert se superposent au centre et virent au jaune.
+
             float latF = dot(vOWorldPos.xz - uBoat.xy, navLat);
             float latL = dot(nl.xy - uBoat.xy, navLat);
             g *= smoothstep(0.0, 1.6, latF * sign(latL));
             gl_FragColor.rgb += uNavCol[i] * g;
           }
         `)
-        // globale partagée: écrite dans color_fragment, lue dans roughnessmap
         .replace('void main() {', /* glsl */`
           float vFoamOut = 0.0;
           void main() {
@@ -651,7 +598,6 @@ export class Ocean {
       this.uniforms.uBoatSize.value.set(boat.spec.length, boat.spec.beam);
       this.uniforms.uBoatY.value = boat.pos.y;
     }
-    // feux de navigation -> éclairage de la surface
     const navLights = boat && boat.visualRig && boat.visualRig.getWaterLights
       ? boat.visualRig.getWaterLights() : null;
     const navUniforms = this.uniforms.uNav.value;

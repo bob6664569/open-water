@@ -14,9 +14,6 @@ function whenIdle(callback) {
   }
 }
 
-// Les décodeurs GLB créent des buffers et textures transitoires importants.
-// Sur appareil contraint, une file unique garantit qu'un seul modèle de faune
-// est décodé à la fois. Sur desktop, les chargements restent parallèles.
 export function loadGLTFDeferred(url, onLoad, onError) {
   const run = () => new Promise(resolve => {
     whenIdle(() => {
@@ -28,6 +25,7 @@ export function loadGLTFDeferred(url, onLoad, onError) {
     });
   });
   if (IS_CONSTRAINED_DEVICE) {
+    // Serialize mobile decodes to cap temporary geometry and texture memory.
     mobileQueue = mobileQueue.then(run);
     return mobileQueue;
   }

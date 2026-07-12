@@ -234,8 +234,6 @@ export const ACHIEVEMENTS = Object.freeze([
   },
 ]);
 
-// Les niveaux conservent leurs identifiants individuels pour la persistence et
-// les notifications, mais partagent une seule entrée dans le journal.
 export const ACHIEVEMENT_ENTRIES = Object.freeze((() => {
   const entries = [];
   const seriesEntries = new Map();
@@ -396,28 +394,21 @@ export class AchievementManager {
         Object.entries(stored.unlocked).forEach(([id, timestamp]) => {
           if (validIds.has(id) && Number.isFinite(timestamp)) unlocked[id] = timestamp;
         });
-        // L'ancien succès de distance représentait déjà exactement un mille.
         if (!unlocked['distance-1'] && Number.isFinite(stored.unlocked['open-water'])) {
           unlocked['distance-1'] = stored.unlocked['open-water'];
         }
       }
+      // Preserve historical unlocks while mapping older save schemas to current tiers.
       const preTierState = !Number.isFinite(stored.version) || stored.version < 3;
       const boats = uniqueStrings(stored.boats);
-      // La v4 déverrouillait le jetski après cinq sauts, beaucoup trop vite.
-      // On retire ce déblocage lors de la migration, sauf si le record de 6 m
-      // était déjà atteint ou si la personne avait effectivement piloté le Sea-Doo.
       const obsoleteJumpReward = stored.version === 4
         && unlocked['wave-rider']
         && finitePositive(stored.bestJumpHeight) < 6
         && !boats.includes('seadoo-gti');
       if (obsoleteJumpReward) delete unlocked['wave-rider'];
-      // Les personnes qui avaient déjà essayé le Sea-Doo avant l'arrivée du
-      // verrou gardent leur accès. Le nouveau parcours concerne les nouveaux profils.
       if (boats.includes('seadoo-gti') && !unlocked['wave-rider']) {
         unlocked['wave-rider'] = Date.now();
       }
-      // Les bateaux à récompense déjà pilotés restent disponibles après
-      // l'arrivée de leur nouveau verrou de progression.
       if (boats.includes('frickies_yacht') && !unlocked['ivory-horizon-veteran']) {
         unlocked['ivory-horizon-veteran'] = Date.now();
       }
@@ -460,21 +451,15 @@ export class AchievementManager {
       if (boats.includes('ss_minnow_iii') && !unlocked['fishermans-instinct']) {
         unlocked['fishermans-instinct'] = Date.now();
       }
-      // L'ancien Fleet Review à cinq bateaux devient le niveau II : le niveau I
-      // est validé au même instant pour préserver une progression cohérente.
       if (unlocked['fleet-review'] && !unlocked['fleet-review-3']) {
         unlocked['fleet-review-3'] = unlocked['fleet-review'];
       }
       if (unlocked['all-weather'] && !unlocked['wave-change']) {
         unlocked['wave-change'] = unlocked['all-weather'];
       }
-      // Le déblocage historique du Minnow correspond désormais au niveau III :
-      // le niveau II intermédiaire est donc validé au même instant.
       if (unlocked['fishermans-instinct'] && !unlocked['school-scattered-3']) {
         unlocked['school-scattered-3'] = unlocked['fishermans-instinct'];
       }
-      // Un profil antérieur à l'indicateur "nouveau" considère ses succès
-      // existants comme déjà consultés, afin d'éviter une fausse alerte.
       const seenAchievements = Array.isArray(stored.seenAchievements)
         ? uniqueStrings(stored.seenAchievements).filter(id => validIds.has(id) && unlocked[id])
         : Object.keys(unlocked);
@@ -483,8 +468,6 @@ export class AchievementManager {
         unlocked,
         seenAchievements,
         voyages: finitePositive(stored.voyages),
-        // Les nouvelles séries de vitesse repartent proprement pour ne pas
-        // débloquer plusieurs niveaux au chargement depuis l'ancien barème.
         bestSpeedKn: preTierState ? 0 : finitePositive(stored.bestSpeedKn),
         distanceMeters: finitePositive(stored.distanceMeters),
         vesselDistanceMeters: positiveRecord(stored.vesselDistanceMeters),
@@ -522,7 +505,7 @@ export class AchievementManager {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
       this.dirty = false;
       this.lastSave = now;
-    } catch { /* persistence is optional when storage is unavailable */ }
+    } catch {  }
   }
 
   _bindUI() {
@@ -534,10 +517,6 @@ export class AchievementManager {
       this.setPanelOpen(false, event.detail === 0);
       if (event.detail > 0) event.currentTarget.blur();
     });
-    // Espace = commande « stop » du bateau : il ne doit jamais (ré)activer les boutons du
-    // journal quand ils gardent le focus (ex. focus rendu au bouton après une fermeture).
-    // On annule seulement l'activation native du bouton (Entrée et clic restent valides) ;
-    // sans stopPropagation, le gestionnaire global reçoit toujours Espace pour couper les gaz.
     [this.button, this.closeButton].forEach(control => {
       control?.addEventListener('keydown', event => {
         if (event.code === 'Space') event.preventDefault();
@@ -551,7 +530,6 @@ export class AchievementManager {
   }
 
   togglePanel(restoreFocus = false) {
-    // panneau fermé quand aria-hidden vaut "true" (ou absent) : on l'ouvre alors, sinon on le referme
     const shouldOpen = this.panel?.getAttribute('aria-hidden') !== 'false';
     this.setPanelOpen(shouldOpen, restoreFocus);
   }
@@ -753,8 +731,6 @@ export class AchievementManager {
       Math.cos(heading - this.circle.lastHeading),
     );
     this.circle.lastHeading = heading;
-    // Un delta aussi grand en une frame correspond à un reset/téléport, pas à
-    // une rotation physique continue du bateau.
     if (Math.abs(delta) > 0.2) {
       this.resetCircle();
       return;

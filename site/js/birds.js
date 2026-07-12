@@ -2,36 +2,13 @@ import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
-// ---------------------------------------------------------------------------
-// Oiseaux de BEAU TEMPS (mer calme / preset 1), module parallèle au système
-// mouettes (wildlife.js) : ceux-là ne volent qu'au calme, filent au large dès
-// que la mer se lève, et ne déclenchent AUCUN cri de mouette.
-//
-//   perroquets (scarlet macaw) : petites escadrilles lâches, colorées.
-//
-// Chaque oiseau bat des ailes via son clip GLB (AnimationMixer) : squelette pour
-// le macaw (skeletonClone).
-//
-// Modèle : « Scarlet Macaw » par Mateus Schwaab (CC-BY-4.0).
-// ---------------------------------------------------------------------------
-
+// Calm-weather macaws use their GLB wing animation and a separate parrot audio bus.
 const _v = new THREE.Vector3();
 const rand = (a, b) => a + Math.random() * (b - a);
 const angLerp = (a, t, k) => a + Math.atan2(Math.sin(t - a), Math.cos(t - a)) * k;
 
 const CALM_PRESET = 1;
 
-// Par espèce :
-//   url/clip/skinned/unlitToStd  span:envergure cible (m)
-//   ORIENTATION (à vérifier en LIVE, bbox ambigu) :
-//     yaw  : rotation Y du modèle. 0 = nez sur +Z. Mettre Math.PI/2 si le modèle
-//            vole DE TRAVERS (envergure alignée à l'axe de vol), + flip si à l'envers.
-//     flip : 0 ou Math.PI (nez pointant vers l'arrière).
-//     pitch: rotation X. Non nul si l'oiseau vole nez en l'air / plongé.
-//   role:'flock'(lâche) | 'vee'(formation en V)  group:[min,max] oiseaux par volée
-//   max:volées simultanées max  interval:[min,max] délai entre volées (s)
-//   alt:[min,max] altitude (m)  speed:[min,max] vitesse (m/s)  flap:[min,max] vitesse de battement
-//   voice:cri procédural (audio.birdCall)  cry:[min,max] délai entre cris d'une volée (s)
 const SPECIES = {
   macaw: {
     url: './assets/animals/scarlet_macaw.glb', clip: /fly/i, skinned: true, unlitToStd: true,
@@ -41,7 +18,7 @@ const SPECIES = {
   },
 };
 
-const CRY_RANGE = 260;   // au-delà, on ne déclenche pas de cri (inaudible)
+const CRY_RANGE = 260;
 
 export class Birds {
   constructor(scene, camera, waveField, audio = null) {
@@ -53,7 +30,7 @@ export class Birds {
 
     this.flights = [];
     this.timers = {};
-    this.protos = {};   // key -> { root, clip, baseScale, yaw }
+    this.protos = {};
     this.loading = new Set();
   }
 
@@ -68,7 +45,7 @@ export class Birds {
       const clip = gltf.animations.find(c => sp.clip.test(c.name)) || gltf.animations[0];
       root.traverse(o => {
         if (!o.isMesh) return;
-        o.frustumCulled = false;   // skinned/morph bbox instable
+        o.frustumCulled = false;
         o.castShadow = false;
         if (sp.unlitToStd && o.material && o.material.isMeshBasicMaterial) {
           const b = o.material;
@@ -82,14 +59,14 @@ export class Birds {
       this.loading.delete(key);
     }, (e) => {
       this.loading.delete(key);
-      console.warn('[birds] chargement échoué', sp.url, e);
+      console.warn('[birds] load failed', sp.url, e);
     });
   }
 
   _makeBird(key) {
     const p = this.protos[key], sp = SPECIES[key];
     const model = sp.skinned ? skeletonClone(p.root) : p.root.clone(true);
-    model.rotation.set(p.pitch, p.yaw, 0);   // pitch (X) + yaw (Y) : correction d'assiette du modèle
+    model.rotation.set(p.pitch, p.yaw, 0);
     model.scale.setScalar(p.baseScale * rand(0.9, 1.15));
     const g = new THREE.Group();
     g.rotation.order = 'YXZ';
@@ -102,8 +79,6 @@ export class Birds {
     return { g, mixer };
   }
 
-  // Décalages de formation (repère volée : x=travers, z=avant). V = meneur devant,
-  // suiveurs en quinconce derrière-gauche / derrière-droite. Flock = éventail lâche.
   _offsets(role, n) {
     const off = [];
     if (role === 'vee') {
@@ -124,7 +99,6 @@ export class Birds {
     const bearing = rand(0, Math.PI * 2), R = rand(120, 200);
     const center = new THREE.Vector3(
       cam.x + Math.sin(bearing) * R, rand(sp.alt[0], sp.alt[1]), cam.z + Math.cos(bearing) * R);
-    // cap : traverse la zone visible en passant près du bateau (jitter)
     const heading = Math.atan2(cam.x + rand(-40, 40) - center.x, cam.z + rand(-40, 40) - center.z);
     const offs = this._offsets(sp.role, n);
     const members = [];
@@ -133,7 +107,7 @@ export class Birds {
       this.scene.add(g);
       members.push({
         g, mixer, off: offs[i],
-        wobP: rand(0, 6.28), wobF: rand(0.4, 1.1), wobA: rand(0.3, 0.9), // flottement propre
+        wobP: rand(0, 6.28), wobF: rand(0.4, 1.1), wobA: rand(0.3, 0.9),
         altP: rand(0, 6.28), altF: rand(0.2, 0.5),
       });
     }
@@ -153,7 +127,6 @@ export class Birds {
     if (leave) fl.leaving = true;
 
     if (fl.leaving) {
-      // la mer se lève : la volée grimpe, accélère et file droit au large
       const cam = this.camera.position;
       const outward = Math.atan2(fl.center.x - cam.x, fl.center.z - cam.z);
       fl.heading = angLerp(fl.heading, outward, Math.min(1, dt * 1.2));
@@ -166,7 +139,6 @@ export class Birds {
     fl.center.z += Math.cos(fl.heading) * fl.speed * dt;
     fl.center.y = fl.altBase + Math.sin(t * fl.altF + fl.altP) * fl.altAmp;
 
-    // repère volée : avant (cap) + travers
     const fx = Math.sin(fl.heading), fz = Math.cos(fl.heading);
     const rx = fz, rz = -fx;
     const bank = THREE.MathUtils.clamp(
@@ -190,7 +162,6 @@ export class Birds {
     const calm = preset === CALM_PRESET;
     if (calm && this.time > 1.5) for (const key of Object.keys(SPECIES)) this._load(key);
 
-    // directeur d'apparition (au calme seulement), par espèce
     if (calm) {
       for (const key of Object.keys(SPECIES)) {
         if (!this.protos[key]) continue;
@@ -212,7 +183,6 @@ export class Birds {
       _v.set(fl.center.x - cam.x, 0, fl.center.z - cam.z);
       const dist = _v.length();
 
-      // Cris spatialisés depuis un oiseau de la volée (pas quand elle fuit).
       if (canCry && !fl.leaving) {
         const sp = SPECIES[fl.key];
         fl.cryTimer -= dt;

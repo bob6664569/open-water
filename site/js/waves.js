@@ -19,20 +19,18 @@ function makeRng(seed) {
   };
 }
 
-// Forme relative du spectre JONSWAP. La normalisation énergétique à Hs est
-// appliquée ensuite, ce qui évite de confondre état de mer et simple gain.
 function jonswapShape(ratio) {
   const sigma = ratio <= 1 ? 0.07 : 0.09;
   const peak = Math.exp(-((ratio - 1) ** 2) / (2 * sigma * sigma));
   return ratio ** -5 * Math.exp(-1.25 * ratio ** -4) * 3.3 ** peak;
 }
 
+// Energy is normalized to significant wave height after shaping the spectrum.
 function makeSpectrum() {
   const rnd = makeRng(987654321);
   const windDir = Math.atan2(0.18, 1.0);
   const components = [];
 
-  // Mer du vent principale: composantes log-espacées autour de la période pic.
   const primaryCount = 12;
   for (let i = 0; i < primaryCount; i++) {
     const t = i / (primaryCount - 1);
@@ -47,7 +45,6 @@ function makeSpectrum() {
     });
   }
 
-  // Petite houle croisée, plus longue et beaucoup moins énergétique.
   const crossDir = windDir + THREE.MathUtils.degToRad(52);
   for (let i = 0; i < 4; i++) {
     const t = i / 3;
@@ -98,17 +95,15 @@ export class WaveField {
     this.targetTp = preset.tp;
   }
 
-  // Compatibilité avec l'ancienne API: 1 correspond désormais à Hs=1,5 m.
   setSeaState(scale) {
     this.targetHs = THREE.MathUtils.clamp(scale * REFERENCE_HS, 0.15, 3.4);
   }
 
   update(dt, anchorX = 0, anchorZ = 0) {
     this.time += dt;
-    // L'énergie peut monter assez vite, mais une période qui change au même
-    // rythme redimensionne toutes les longueurs d'onde et donne l'impression
-    // que l'océan se déroule. On laisse donc la houle se réorganiser lentement.
     const heightEase = 1 - Math.exp(-dt * 0.55);
+    // Period changes stay deliberately slower than height changes; otherwise every
+    // wavelength resizes at once and the ocean appears to slide under the boat.
     const periodEase = 1 - Math.exp(-dt * 0.09);
     this.significantWaveHeight = THREE.MathUtils.lerp(
       this.significantWaveHeight, this.targetHs, heightEase);
@@ -128,9 +123,8 @@ export class WaveField {
       const frequency = w.ratio / this.peakPeriod;
       const nextOmega = TAU * frequency;
       const nextK = (nextOmega * nextOmega) / G;
-      // Préserve la phase spatiale au voisinage du bateau lorsque k évolue :
-      // une crête présente à cet endroit reste une crête au frame suivant.
       if (w.k > 0 && nextK !== w.k) {
+        // Preserve the phase at the boat while the wavelength changes.
         const anchorProjection = w.dx * anchorX + w.dz * anchorZ;
         w.phase += (w.k - nextK) * anchorProjection;
       }

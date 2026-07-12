@@ -2,40 +2,26 @@ import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
-// ---------------------------------------------------------------------------
-// Faune ambiante pilotée par l'état de mer.
-//
-// Mouettes qui traversent le ciel par mer peu agitée (preset « Rolling »).
-//
-// Visuel : modèle GLB riggé (flying_seagull.glb) cloné par SkeletonUtils, animé
-// par AnimationMixer, on mélange le clip « flap » (battement) et « planer »
-// (vol plané) selon une enveloppe, comme une vraie mouette. Si le GLB ne charge
-// pas, on retombe sur une silhouette procédurale (corps + deux ailes battantes).
-// ---------------------------------------------------------------------------
-
+// Ambient gulls blend flap and glide clips, with a procedural fallback on load failure.
 const _v = new THREE.Vector3();
 
-// Apparition des mouettes par état de mer (index de SEA_PRESETS).
-//   max      : nombre max simultané           interval : délai [min,max] entre apparitions (s)
 const GULL_SPAWN = {
-  2: { max: 14, interval: [2, 6] },   // Rolling : population dense
-  3: { max: 2, interval: [12, 30] },  // Rough   : 1–2 mouettes de temps en temps
+  2: { max: 14, interval: [2, 6] },
+  3: { max: 2, interval: [12, 30] },
 };
-const STORM_PRESET = 4; // au-delà : les mouettes fuient vers le large
+const STORM_PRESET = 4;
 
 const MODEL_URL   = './assets/animals/flying_seagull.glb';
-const TARGET_SPAN = 1.6;      // envergure cible (m) après mise à l'échelle du modèle
-const MODEL_YAW   = 0;        // correction d'orientation du modèle (0 ou Math.PI)
+const TARGET_SPAN = 1.6;
+const MODEL_YAW   = 0;
 const GUIDED_BIRD_SCALE = typeof window !== 'undefined'
   && (window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window)
   ? 2.35
   : 1.85;
 
 const rand = (a, b) => a + Math.random() * (b - a);
-// Rapproche `a` de l'angle `target` par le plus court chemin, d'une fraction k.
 const angLerp = (a, target, k) => a + Math.atan2(Math.sin(target - a), Math.cos(target - a)) * k;
 
-// --- Fallback procédural (utilisé seulement si le GLB échoue) ---------------
 let SHARED = null;
 function sharedAssets() {
   if (SHARED) return SHARED;
@@ -75,13 +61,11 @@ export class Wildlife {
 
     this.gulls = [];
     this.spawnTimer = rand(2, 6);
-    this.cryTimer = rand(2, 5); // prochain cri de mouette
+    this.cryTimer = rand(2, 5);
     this.spawnRadius = [80, 170];
-    this.despawnRadius = 560;   // portée normale de disparition
-    this.fleeRadius = 320;      // en fuite : disparaît plus tôt → ciel dégagé plus vite
+    this.despawnRadius = 560;
+    this.fleeRadius = 320;
 
-    // Chargement du modèle. On ne spawne qu'une fois `loaded` (modèle prêt, ou
-    // échec → fallback procédural).
     this.proto = null;
     this.clips = null;
     this.baseScale = 1;
@@ -98,11 +82,11 @@ export class Wildlife {
       const size = new THREE.Box3().setFromObject(gltf.scene).getSize(new THREE.Vector3());
       this.baseScale = TARGET_SPAN / Math.max(size.x, size.z, 1e-3);
       this.proto.traverse(o => {
-        if (o.isMesh) { o.frustumCulled = false; o.castShadow = false; } // skinned bbox instable → pas de cull
+        if (o.isMesh) { o.frustumCulled = false; o.castShadow = false; }
       });
       this.loaded = true;
     }, (e) => {
-      console.warn('[wildlife] GLB mouette non chargé, fallback procédural :', e);
+      console.warn('[wildlife] gull GLB failed to load, using procedural fallback:', e);
       this.loaded = true;
     });
   }
@@ -122,7 +106,7 @@ export class Wildlife {
       : toCam + (Math.random() < 0.5 ? 1 : -1) * rand(0.7, 1.4);
 
     const g = new THREE.Group();
-    g.rotation.order = 'YXZ'; // lacet, tangage, roulis
+    g.rotation.order = 'YXZ';
     g.position.copy(pos);
 
     const bird = {
@@ -176,8 +160,6 @@ export class Wildlife {
     return bird;
   }
 
-  // Premier voyage : un groupe clairement lisible tourne au-dessus d'une zone
-  // d'activité marine. Le modèle habituel est conservé, avec son fallback.
   spawnGuidedFlockAt(position, count = 14) {
     this._load();
     if (!this.loaded) return false;
@@ -214,8 +196,6 @@ export class Wildlife {
     const t = this.time;
     b.life += dt;
 
-    // --- Fuite (mer déchaînée) : cap vers le large, accélération, montée, ------
-    //     battements soutenus. Une fois enclenchée, la mouette s'engage à partir.
     if (flee) b.fleeing = true;
     if (b.fleeing) {
       const cam = this.camera.position;
@@ -236,12 +216,10 @@ export class Wildlife {
         b.rp.rotation.z = d; b.lp.rotation.z = d;
       }
       b.g.position.copy(b.pos);
-      b.g.rotation.set(0.08, b.heading, 0); // léger cabré, ailes à plat
+      b.g.rotation.set(0.08, b.heading, 0);
       return;
     }
 
-    // Les oiseaux du premier voyage restent ancrés à la rencontre jusqu'à sa
-    // fin explicite ; ils ne dérivent jamais pendant que le joueur les rejoint.
     if (b.guidedCenter) {
       const dx = b.pos.x - b.guidedCenter.x;
       const dz = b.pos.z - b.guidedCenter.z;
@@ -264,8 +242,6 @@ export class Wildlife {
       return;
     }
 
-    // Mer formée (Rough) : le vent chahute les mouettes, errance plus large,
-    // rafales rapides qui les font louvoyer et tanguer.
     const rough = this.wf.preset === 3 ? 1 : 0;
     const gust = rough * Math.sin(t * (1.6 + b.wanderFreq * 3) + b.wanderPhase * 2.3);
 
@@ -277,25 +253,20 @@ export class Wildlife {
     b.pos.y = b.altBase + Math.sin(t * b.altFreq + b.altPhase) * b.altAmp * (1 + rough * 1.3)
             + gust * 0.8;
 
-    // Enveloppe de plané (0 = bat des ailes, 1 = plané).
     const glide = THREE.MathUtils.smoothstep(
       Math.sin(t * b.glideFreq + b.glidePhase), -0.1, 0.7);
 
     if (b.mixer) {
-      // Mélange des clips selon l'enveloppe.
       if (b.flapAct)  b.flapAct.setEffectiveWeight(1 - glide);
       if (b.glideAct) b.glideAct.setEffectiveWeight(glide);
       b.mixer.update(dt);
     } else if (b.rp) {
-      // Battement procédural (fallback).
       b.flapPhase += b.flapFreq * (1 - glide * 0.85) * dt;
       const dihedral = b.restDihedral + glide * 0.12 + Math.sin(b.flapPhase) * b.flapAmp * (1 - glide);
       b.rp.rotation.z = dihedral;
       b.lp.rotation.z = dihedral;
     }
 
-    // Orientation : cap (lacet) + inclinaison dans les virages (roulis),
-    // accentuée et chahutée par les rafales en mer formée.
     const bank = THREE.MathUtils.clamp(
       -wander * 6 + gust * 0.5, -0.5 - rough * 0.35, 0.5 + rough * 0.35);
     b.g.position.copy(b.pos);
@@ -307,7 +278,7 @@ export class Wildlife {
     const preset = this.wf.preset;
     const cfg = GULL_SPAWN[preset];
     if (this.time > 1.5 && (cfg || this.gulls.length)) this._load();
-    if (!this.loaded) return; // on attend le modèle (ou son échec)
+    if (!this.loaded) return;
     if (cfg) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0 && this.gulls.length < cfg.max) {
@@ -316,7 +287,6 @@ export class Wildlife {
       }
     }
 
-    // À partir de l'état « Storm », les mouettes présentes fuient vers le large.
     const flee = preset >= STORM_PRESET;
 
     const cam = this.camera.position;
@@ -332,8 +302,6 @@ export class Wildlife {
       }
     }
 
-    // Cris occasionnels, spatialisés à la position d'une mouette (plus fréquents
-    // quand il y en a plus). Le son démarre au 1er geste utilisateur.
     if (this.audio && this.audio.started && this.gulls.length) {
       this.cryTimer -= dt;
       if (this.cryTimer <= 0) {

@@ -1,8 +1,5 @@
 import * as THREE from 'three';
 
-// Paysage sonore hybride : enregistrements réels pour les éléments dont le
-// timbre est difficile à synthétiser, Web Audio procédural pour les couches
-// réactives (vent, cavitation, impacts) et pour le mode de secours.
 
 const ENGINE_BANKS = {
   zefiro: {
@@ -20,8 +17,6 @@ const ENGINE_BANKS = {
   'seadoo-gti': {
     low: './assets/audio/engines/seadoo-low.wav',
     high: './assets/audio/engines/seadoo-high.wav',
-    // Les deux extraits Sea-Doo sont des boucles a regime constant. Toute variation de
-    // regime vient donc de la commande du joueur, pas de l'enregistrement.
     lowRate: rpm => 0.76 + rpm * 0.56,
     highRate: rpm => 0.72 + rpm * 0.48,
   },
@@ -57,7 +52,6 @@ const THUNDER_BANKS = {
   ],
 };
 
-// Cris de mouettes (one-shots), déclenchés par la présence d'oiseaux.
 const GULL_CRIES = [
   './assets/audio/animals/gull-1.mp3',
   './assets/audio/animals/gull-2.mp3',
@@ -65,8 +59,6 @@ const GULL_CRIES = [
   './assets/audio/animals/gull-4.mp3',
 ];
 
-// Cris d'oiseaux du lagon (mer calme), vrais enregistrements CC0 (voir
-// LICENSES.md). Repli procédural si les fichiers sont absents.
 const BIRD_CRIES = {
   parrot: [
     './assets/audio/animals/parrot-1.mp3',
@@ -121,13 +113,8 @@ export class BoatAudio {
     this.lastGull = '';
     this.lastBird = { parrot: '' };
     this.lastSlam = -10;
-    // Proximité caméra→bateau (1 = collé, 0 = vue large). Pilote le volume du
-    // moteur et des chocs de coque : plus on zoome, plus on les entend.
     this.impactProximity = 0.7;
 
-    // Les buffers audio peuvent représenter plusieurs dizaines de Mo une fois
-    // décodés. Aucun téléchargement ne démarre avant le geste utilisateur afin
-    // de ne pas concurrencer le HDR, le bateau et la faune au chargement mobile.
     this.assetRequests = null;
 
     this._enginePosition = new THREE.Vector3();
@@ -163,7 +150,7 @@ export class BoatAudio {
     this.thunderBus.gain.value = 0.95;
     this.gullBus = ctx.createGain();
     this.gullBus.gain.value = 0.5;
-    this.birdBus = ctx.createGain();       // perroquets + flamants (échantillons CC0 / repli synthé)
+    this.birdBus = ctx.createGain();
     this.birdBus.gain.value = 0.38;
     this.engineBus.connect(this.master);
     this.ambientBus.connect(this.ambientDuck).connect(this.master);
@@ -190,8 +177,6 @@ export class BoatAudio {
   _startProceduralLayers() {
     const ctx = this.ctx;
 
-    // Moteur synthétique discret : audible uniquement si les échantillons ne
-    // peuvent pas être chargés.
     this.engOsc1 = ctx.createOscillator();
     this.engOsc1.type = 'sawtooth';
     this.engOsc2 = ctx.createOscillator();
@@ -210,8 +195,6 @@ export class BoatAudio {
     this.engOsc1.start();
     this.engOsc2.start();
 
-    // Vent large bande, toujours procédural car sa réponse doit suivre sans
-    // délai la vitesse relative et la force de la tempête.
     this.windSrc = ctx.createBufferSource();
     this.windSrc.buffer = noiseBuffer(ctx);
     this.windSrc.loop = true;
@@ -224,7 +207,6 @@ export class BoatAudio {
     this.windSrc.connect(this.windFilter).connect(this.windGain).connect(this.ambientBus);
     this.windSrc.start();
 
-    // Cavitation/jet : bruit plus clair que la mer, placé avec le moteur.
     this.propSrc = ctx.createBufferSource();
     this.propSrc.buffer = noiseBuffer(ctx);
     this.propSrc.loop = true;
@@ -241,9 +223,6 @@ export class BoatAudio {
     this.enginePanner = ctx.createPanner();
     this.enginePanner.panningModel = 'HRTF';
     this.enginePanner.distanceModel = 'inverse';
-    // Atténuation douce : le panner garde le moteur présent sur toute la plage
-    // de zoom (il place surtout le son dans le champ stéréo). Le contraste
-    // près/loin est appliqué explicitement via la proximité dans update().
     this.enginePanner.refDistance = 5;
     this.enginePanner.maxDistance = 90;
     this.enginePanner.rolloffFactor = 0.35;
@@ -251,8 +230,6 @@ export class BoatAudio {
     this.propSrc.connect(this.propFilter).connect(this.propGain).connect(this.engineFilter);
     this.propSrc.start();
 
-    // Fond de mer de secours, supprimé en fondu dès que les prises réelles
-    // sont décodées.
     this.fallbackSeaSrc = ctx.createBufferSource();
     this.fallbackSeaSrc.buffer = noiseBuffer(ctx);
     this.fallbackSeaSrc.loop = true;
@@ -268,8 +245,8 @@ export class BoatAudio {
   }
 
   async _decodeAssets() {
-    // Décodage séquentiel : decodeAudioData peut dupliquer temporairement le
-    // MP3 et le PCM. Promise.all créait un pic important sur Safari/iOS.
+    // Decode sequentially: Safari may hold both compressed and PCM buffers during
+    // decodeAudioData, and parallel decoding causes large transient memory spikes.
     const decoded = [];
     for (const [path, request] of this.assetRequests) {
       try {
@@ -277,7 +254,7 @@ export class BoatAudio {
         const buffer = await this.ctx.decodeAudioData(data.slice(0));
         decoded.push([path, buffer]);
       } catch (error) {
-        console.warn(`Audio indisponible: ${path}`, error);
+        console.warn(`Audio unavailable: ${path}`, error);
       }
     }
     decoded.forEach(([path, buffer]) => this.buffers.set(path, buffer));
@@ -309,11 +286,6 @@ export class BoatAudio {
       bankGain.gain.value = 0;
       lowGain.gain.value = 0;
       highGain.gain.value = 0;
-      // gainValue = 1 : le gain interne de _loop reste transparent, ce sont les
-      // gains externes low/high/bank (pilotés par update) qui dosent le moteur.
-      // Sans ça, le gain interne resterait à 0 et les échantillons moteur
-      // dédiés seraient multipliés par zéro (silence → on n'entendait que la
-      // cavitation procédurale, façon bruit blanc).
       const low = this._loop(config.low, lowGain, 1);
       const high = this._loop(config.high, highGain, 1);
       if (!low || !high) continue;
@@ -330,8 +302,6 @@ export class BoatAudio {
     this.wavesStorm = this._loop(AMBIENT_ASSETS.wavesStorm, this.ambientBus);
   }
 
-  // Impact de coque : transitoire procédurale, avec anti-mitraillage lorsque
-  // l'intensité reste au-dessus du seuil pendant plusieurs images.
   slam(intensity) {
     if (!this.started) return;
     const ctx = this.ctx;
@@ -339,7 +309,6 @@ export class BoatAudio {
     if (now - this.lastSlam < 0.16) return;
     this.lastSlam = now;
     const gain = ctx.createGain();
-    // Un choc lointain reste feutré, un choc vu de près claque nettement.
     const peak = Math.min(0.55, intensity * 0.24 * this.impactProximity);
     gain.gain.setValueAtTime(Math.max(0.001, peak), now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
@@ -354,8 +323,6 @@ export class BoatAudio {
     src.stop(now + 0.42);
   }
 
-  // Cri de mouette : one-shot spatialisé à la position de l'oiseau, pitch varié.
-  // Déclenché par le module de faune quand des mouettes sont présentes.
   gullCall(position = null, gain = 1) {
     if (!this.started) return;
     const available = GULL_CRIES.filter(path => this.buffers.has(path));
@@ -393,13 +360,9 @@ export class BoatAudio {
     src.start(now);
   }
 
-  // Cri de perroquet spatialisé à la position de l'oiseau.
-  // Distinct des mouettes (bus propre). Déclenché par le module d'oiseaux au calme.
-  // Joue un VRAI échantillon CC0 si disponible, sinon repli procédural synthétisé.
   birdCall(type = 'parrot', position = null, gain = 1) {
     if (!this.started) return;
     const ctx = this.ctx, now = ctx.currentTime;
-    // sortie spatialisée commune (échantillon ou synthèse)
     let dest = this.birdBus;
     if (position) {
       const panner = ctx.createPanner();
@@ -430,12 +393,9 @@ export class BoatAudio {
       src.start(now);
       return;
     }
-    // repli procédural (aucun fichier chargé)
     this._parrotSquawk(ctx, now, dest, gain);
   }
 
-  // Perroquet : cri bref, rauque, à pitch descendant, granularisé (roughness),
-  // parfois doublé.
   _parrotSquawk(ctx, t0, dest, gain) {
     const n = Math.random() < 0.4 ? 2 : 1;
     let t = t0;
@@ -446,7 +406,6 @@ export class BoatAudio {
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(f0, t);
       osc.frequency.exponentialRampToValueAtTime(f0 * 0.6, t + dur);
-      // roughness : trémolo rapide modulant un gain (base 0.6 ± profondeur)
       const trem = ctx.createOscillator();
       trem.type = 'square';
       trem.frequency.value = 34 + Math.random() * 22;
@@ -493,7 +452,7 @@ export class BoatAudio {
     panner.panningModel = 'HRTF';
     panner.distanceModel = 'inverse';
     panner.refDistance = 1;
-    panner.rolloffFactor = 0; // le gain dépend de la distance acoustique, pas du sprite
+    panner.rolloffFactor = 0;
     if (position) {
       panner.positionX.value = position.x;
       panner.positionY.value = position.y;
@@ -509,7 +468,6 @@ export class BoatAudio {
     src.connect(filter).connect(panner).connect(gain).connect(this.thunderBus);
     src.start(start);
 
-    // Un impact proche masque momentanément le vent, la pluie et les vagues.
     const duck = tier === 'near' ? 0.62 : tier === 'mid' ? 0.78 : 0.9;
     this.ambientDuck.gain.cancelScheduledValues(start);
     this.ambientDuck.gain.setTargetAtTime(duck, start, 0.035);
@@ -583,11 +541,6 @@ export class BoatAudio {
     const bankId = profile.bank || boat.spec.id;
     this.activeVessel = bankId;
     const blend = smoothstep(this.engineRpm, 0.38, 0.78);
-    // Plancher de ralenti, réglable par navire : gaz coupés (load = 0), le
-    // moteur reste à `idleLevel` de son plein régime. Un plein-gaz (load = 1)
-    // sort toujours à `sampleGain`, quel que soit le plancher. Le yacht, avec
-    // le plus gros sampleGain de la flotte, descend plus bas pour éviter le
-    // ronron de « 4 cylindres » à l'arrêt.
     const idleLevel = profile.idleLevel ?? 0.38;
     for (const [id, bank] of this.engineBanks) {
       const active = id === bankId;
@@ -601,7 +554,6 @@ export class BoatAudio {
       setSmooth(bank.high.playbackRate, bank.config.highRate(this.engineRpm), now, 0.07);
     }
 
-    // Secours synthétique si le réseau ou le décodage échoue.
     const fallbackHz = (profile.idleHz + this.engineRpm
       * (profile.maxHz - profile.idleHz));
     setSmooth(this.engOsc1.frequency, fallbackHz, now, 0.08);
@@ -619,9 +571,6 @@ export class BoatAudio {
 
     const cameraDistance = camera ? camera.position.distanceTo(boat.pos) : 20;
 
-    // Proximité : 1 au plus près (~5 m, vue rapprochée ou poste de barre),
-    // tombant vers 0 en vue large (~34 m). Elle monte le bus moteur et les
-    // chocs de coque quand on zoome sur le bateau, et les efface au loin.
     const proximity = 1 - smoothstep(cameraDistance, 6, 34);
     setSmooth(this.engineBus.gain, 0.9 * (0.68 + proximity * 0.5), now, 0.16);
     this.impactProximity = 0.35 + proximity * 0.65;

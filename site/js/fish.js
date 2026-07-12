@@ -2,15 +2,7 @@ import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
-// ---------------------------------------------------------------------------
-// Faune subaquatique : poissons côtiers qui nagent sous la surface, visibles
-// par RÉFRACTION (couche 1, comme la coque immergée). Bancs denses (boids
-// léger) pour les espèces grégaires + nageurs solitaires colorés.
-//
-// Modèles : pack Quaternius (CC0), chaque poisson est riggé avec un clip de
-// nage, joué par AnimationMixer ; clonés par SkeletonUtils.
-// ---------------------------------------------------------------------------
-
+// Underwater fauna render on the refraction layer and react to the boat's future path.
 const _v = new THREE.Vector3();
 const rand = (a, b) => a + Math.random() * (b - a);
 const angLerp = (a, target, k) => a + Math.atan2(Math.sin(target - a), Math.cos(target - a)) * k;
@@ -19,26 +11,17 @@ const turnToward = (a, target, maxStep) => a + THREE.MathUtils.clamp(
 const moveToward = (value, target, maxStep) => value + THREE.MathUtils.clamp(target - value, -maxStep, maxStep);
 
 const FISH_DIR = './assets/animals/fish/';
-// Profondeur faible : la réfraction (demi-résolution) absorbe vite avec la
-// distance à la surface, donc on garde les poissons près du dessous de l'eau.
-const DEPTH = [-2.4, -0.9];   // bande de profondeur (m sous le niveau moyen 0)
-const DESPAWN = 145;          // au-delà : le banc/poisson est retiré (invisible à cette distance)
-const FISH_FLIP = 0;          // correction nez (0 ou Math.PI), réglée au rendu
-const BOAT_FLEE_R = 8;        // rayon d'effarouchement autour de la TRAJECTOIRE du bateau (m)
-const BOAT_FLEE_STR = 11;     // force de fuite
-const BOAT_LEAD = 1.0;        // anticipation : on regarde où le bateau sera dans ~1 s
-const SCHOOL_REARM_COOLDOWN = 8; // délai minimal avant qu'un même banc puisse recompter
-const SCHOOL_CALM_TO_REARM = 4;  // temps sans menace nécessaire pour considérer le banc reformé
-const SHARK_NOTICE_R = 65;    // il ne s'intéresse au bateau que s'il est encore dans la zone
-const SHARK_AVOID_R = 11;     // évitement progressif, sans demi-tour instantané
+const DEPTH = [-2.4, -0.9];
+const DESPAWN = 145;
+const FISH_FLIP = 0;
+const BOAT_FLEE_R = 8;
+const BOAT_FLEE_STR = 11;
+const BOAT_LEAD = 1.0;
+const SCHOOL_REARM_COOLDOWN = 8;
+const SCHOOL_CALM_TO_REARM = 4;
+const SHARK_NOTICE_R = 65;
+const SHARK_AVOID_R = 11;
 
-// Faune subaquatique par état de mer. Chaque espèce déclare :
-//   file/clip/len/tint (voir plus bas)   girth : amincissement hors-longueur (<1 = fuselé)
-//   role : 'school' (banc) ou 'solo'     presets : états de mer où elle apparaît
-//   max : nombre simultané max de cette espèce   interval : délai [min,max] entre apparitions (s)
-// Le pack tropical contient neuf poissons riggés dans une seule scène. Il est
-// découpé au chargement en individus (géométrie + pistes d'animation) afin que
-// chacun puisse suivre sa propre trajectoire dans le banc.
 const SPECIES = {
   tropical:  {
     file: '../tropical-fish-school-512.glb', len: 0.72,
@@ -48,11 +31,8 @@ const SPECIES = {
     speed: [0.55, 0.95], memberSpeed: [0.45, 0.85], behavior: 'packed-school',
     cohesion: 0.25, alignment: 0.55, separation: 0.8,
   },
-  // Rolling (large) : pélagiques fuselés.
   tuna:      { file: 'tuna.glb',      clip: 'Fish_Armature|Swimming_Normal', len: 0.95, tint: null,     girth: 0.6,  role: 'school', presets: [2], max: 3, interval: [9, 22] },
   swordfish: { file: 'swordfish.glb', clip: 'Fish_Armature|Swimming_Normal', len: 1.5,  tint: null,     girth: 0.48, role: 'solo',   presets: [2], max: 2, interval: [8, 20] },
-  // Rough (mer formée) : un requin de récif réaliste qui rôde autour du bateau.
-  // Modèle texturé → pas de tint ni de girth (on garde ses vraies proportions/texture).
   shark:     { file: 'shark.glb',     clip: 'Action_Shark Armature', len: 5.6, tint: null, flip: 0, role: 'solo',   presets: [3], max: 1, interval: [10, 24], behavior: 'shark' },
 };
 
@@ -69,8 +49,6 @@ function guidedFallbackAssets() {
   ]), 3));
   tail.computeVertexNormals();
   const colors = [0xd5f7ff, 0x82e6f2, 0xffe69a, 0xb5d9ff];
-  // MeshBasic garantit la lecture dans la passe de réfraction, même lorsque les
-  // lumières de la scène ne partagent pas la couche technique des poissons.
   const materials = colors.map(color => new THREE.MeshBasicMaterial({
     color, side: THREE.DoubleSide,
   }));
@@ -78,13 +56,12 @@ function guidedFallbackAssets() {
   return GUIDED_FALLBACK_ASSETS;
 }
 
-// Oriente un groupe (nez local = +z) le long d'un vecteur vitesse : lacet + tangage.
 function orientTo(group, vel) {
   const sp = Math.hypot(vel.x, vel.y, vel.z);
   if (sp < 1e-5) return;
   group.rotation.set(
-    Math.asin(THREE.MathUtils.clamp(vel.y / sp, -1, 1)), // tangage
-    Math.atan2(vel.x, vel.z),                            // lacet
+    Math.asin(THREE.MathUtils.clamp(vel.y / sp, -1, 1)),
+    Math.atan2(vel.x, vel.z),
     0);
 }
 
@@ -101,11 +78,11 @@ export class FishLife {
     this.boat = boat;
     this.time = 0;
 
-    this.protos = {};        // key -> { root, clip, baseScale, yaw, lenAxis }
+    this.protos = {};
     this.schools = [];
     this.solos = [];
-    this.dispersedSchools = 0; // compteur de dispersions réelles provoquées par le bateau
-    this.timers = {};        // key -> délai avant prochaine apparition
+    this.dispersedSchools = 0;
+    this.timers = {};
     this.loading = new Set();
   }
 
@@ -118,7 +95,7 @@ export class FishLife {
         const variants = this._splitPackedSchool(gltf, sp);
         if (!variants.length) {
           this.loading.delete(key);
-          console.warn('[fish] aucun poisson individuel trouvé dans', sp.file);
+          console.warn('[fish] no individual fish found in', sp.file);
           return;
         }
         this.protos[key] = { variants };
@@ -127,8 +104,6 @@ export class FishLife {
       }
       const root = gltf.scene;
       const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
-      // Orientation : amener l'axe long du corps sur +Z (nez). axisFix:'y' pour
-      // les modèles montés DEBOUT (longueur sur Y) → on les bascule à l'horizontale.
       let baseScale, lenAxis, rotX = 0, rotY;
       const flip = sp.flip ?? FISH_FLIP;
       if (sp.axisFix === 'y') {
@@ -141,9 +116,9 @@ export class FishLife {
       }
       root.traverse(o => {
         if (!o.isMesh) return;
-        o.frustumCulled = false;      // skinned bbox instable
+        o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.set(1);              // visible via réfraction (sous l'eau)
+        o.layers.set(1);
         if (sp.tint != null && o.material) {
           o.material = o.material.clone();
           o.material.color = new THREE.Color(sp.tint);
@@ -154,21 +129,16 @@ export class FishLife {
       this.loading.delete(key);
     }, (e) => {
       this.loading.delete(key);
-      console.warn('[fish] chargement échoué', sp.file, e);
+      console.warn('[fish] load failed', sp.file, e);
     });
   }
 
-  // Le GLB tropical utilise un seul squelette pour neuf poissons et regroupe
-  // leurs surfaces dans quatre SkinnedMesh. On conserve, pour chaque individu,
-  // uniquement les triangles influencés par ses os et les pistes qui portent
-  // son préfixe (Clown1, blue_tang2, etc.). Les gros attributs de sommets restent
-  // partagés : seuls les petits index filtrés sont dupliqués.
   _splitPackedSchool(gltf, sp) {
+    // The tropical asset shares one skeleton across nine fish. Split triangles by
+    // bone prefix and retain only the matching animation tracks for each variant.
     const prefixes = new Set();
     gltf.scene.traverse(o => {
       if (!o.isBone) return;
-      // GLTFLoader nettoie les noms Sketchfab (`Clown1:Root.5_9` devient
-      // `Clown1Root5_9`) : le nom de l'os racine reste notre séparateur fiable.
       const match = o.name.match(/^(.+?)Root(?:\d|$)/);
       if (match) prefixes.add(match[1]);
     });
@@ -267,8 +237,6 @@ export class FishLife {
     return filtered;
   }
 
-  // Crée un poisson (groupe extérieur = mouvement, modèle intérieur = correction
-  // d'orientation + échelle) avec son mixer jouant le clip de nage.
   _make(key) {
     const proto = this.protos[key];
     const p = proto.variants
@@ -278,7 +246,6 @@ export class FishLife {
     model.rotation.set(p.rotX, p.rotY, 0);
     const s = p.baseScale * rand(0.82, 1.2);
     model.scale.set(s, s, s);
-    // Amincissement (garde la longueur), seulement pour les modèles horizontaux.
     const girth = SPECIES[key].girth ?? 1;
     if (girth !== 1 && p.lenAxis !== 'y') {
       model.scale.y *= girth;
@@ -297,7 +264,6 @@ export class FishLife {
   _spawnSchool(key, { center: guidedCenter = null, heading: guidedHeading = null } = {}) {
     const cam = this.camera.position;
     const sp = SPECIES[key];
-    // Apparition LOIN (invisible à travers l'eau) → le banc arrive en nageant.
     const spawnRadius = sp.spawnRadius || [65, 105];
     const bearing = rand(0, Math.PI * 2), R = rand(spawnRadius[0], spawnRadius[1]);
     const guided = !!guidedCenter;
@@ -308,7 +274,6 @@ export class FishLife {
         rand(DEPTH[0] + 0.4, DEPTH[1] - 0.4),
         cam.z + Math.cos(bearing) * R,
       );
-    // Cap vers un point proche du bateau (jitter) → traverse la zone visible.
     const heading = Number.isFinite(guidedHeading)
       ? guidedHeading
       : Math.atan2(cam.x + rand(-8, 8) - center.x, cam.z + rand(-8, 8) - center.z);
@@ -352,17 +317,11 @@ export class FishLife {
     return this.schools[this.schools.length - 1];
   }
 
-  // Premier voyage : prépare puis place un vrai banc sur le cap suggéré.
-  // Le chargement reste différé/séquentiel ; l'appelant réessaie simplement
-  // jusqu'à ce que le prototype soit prêt, sans dupliquer le téléchargement.
   spawnGuidedSchoolsAt(position, heading = 0) {
     const key = this.wf.preset === 2 ? 'tuna' : null;
     if (!key) return [];
     this._load(key);
     if (this.guidedFallbackSchools?.length) return this.guidedFallbackSchools;
-    // Le tutoriel ne dépend volontairement pas du GLB : le fallback est plus
-    // dense, plus proche de la surface et disponible instantanément. Cinq
-    // centres fixes forment une vraie zone lisible sous la ronde d'oiseaux.
     const schools = [];
     for (let i = 0; i < 5; i++) {
       const angle = i / 5 * Math.PI * 2 + 0.32;
@@ -452,7 +411,6 @@ export class FishLife {
   scatterGuidedSchools(schools) {
     let scattered = false;
     for (const school of schools || []) scattered = this._scatterGuidedSchool(school) || scattered;
-    // Les cinq bancs constituent une seule rencontre pour les achievements.
     if (scattered) this.dispersedSchools += 1;
     return scattered;
   }
@@ -473,9 +431,6 @@ export class FishLife {
   _spawnSolo(key) {
     const cam = this.camera.position;
 
-    // Le requin arrive sur une trajectoire MONDE. Le premier point de passage
-    // est choisi près de la position actuelle du bateau, mais ne lui reste pas
-    // attaché : si le bateau accélère, le requin poursuit naturellement sa route.
     if (SPECIES[key].behavior === 'shark') {
       const ctr = this.boat ? this.boat.pos : this.camera.position;
       const R = rand(38, 58), angle = rand(0, Math.PI * 2);
@@ -502,7 +457,6 @@ export class FishLife {
       return;
     }
 
-    // Apparition loin → le poisson entre dans le champ en nageant vers le bateau.
     const bearing = rand(0, Math.PI * 2), R = rand(55, 95);
     const { g, mixer } = this._make(key);
     const pos = new THREE.Vector3(
@@ -520,8 +474,6 @@ export class FishLife {
     });
   }
 
-  // Menace du bateau : distance à sa TRAJECTOIRE (position anticipée sur ~2 s),
-  // donc les poissons fuient AVANT l'arrivée. Renvoie l'esquive + l'urgence, ou null.
   _boatThreat(px, pz, radius = BOAT_FLEE_R) {
     const b = this.boat;
     if (!b) return null;
@@ -529,13 +481,13 @@ export class FishLife {
     const v2 = vx * vx + vz * vz;
     let cx, cz;
     if (v2 > 1) {
-      let ts = ((px - b.pos.x) * vx + (pz - b.pos.z) * vz) / v2; // instant de plus proche passage
-      ts = Math.max(0, Math.min(BOAT_LEAD, ts));                 // borné au futur proche
+      let ts = ((px - b.pos.x) * vx + (pz - b.pos.z) * vz) / v2;
+      ts = Math.max(0, Math.min(BOAT_LEAD, ts));
       cx = b.pos.x + vx * ts; cz = b.pos.z + vz * ts;
     } else { cx = b.pos.x; cz = b.pos.z; }
     let dx = px - cx, dz = pz - cz, cd = Math.hypot(dx, dz);
     if (cd >= radius) return null;
-    if (cd < 0.4 && v2 > 1) { const vn = Math.sqrt(v2); dx = -vz / vn; dz = vx / vn; cd = 1; } // pile devant → esquive latérale
+    if (cd < 0.4 && v2 > 1) { const vn = Math.sqrt(v2); dx = -vz / vn; dz = vx / vn; cd = 1; }
     const inv = 1 / (cd || 1e-3);
     return { ax: dx * inv, az: dz * inv, u: 1 - cd / radius };
   }
@@ -543,8 +495,6 @@ export class FishLife {
   _updateSchool(s, dt) {
     const t = this.time;
     s.life += dt;
-    // Le centre du banc erre TRÈS légèrement (sinon il ne traverse jamais le
-    // champ) : l'amplitude du cap vaut coef/wanderFreq, d'où un coef minuscule.
     s.heading += (s.anchored ? 0.08 : Math.sin(t * s.wanderFreq + s.wanderPhase) * 0.015) * dt;
     if (!s.anchored) {
       s.center.x += Math.sin(s.heading) * s.speed * dt;
@@ -559,14 +509,13 @@ export class FishLife {
     const schoolVel = _v.set(Math.sin(s.heading), 0, Math.cos(s.heading)).multiplyScalar(s.speed);
     const M = s.members;
     let threatenedMembers = 0;
+    let strongestThreat = 0;
     for (let i = 0; i < M.length; i++) {
       const m = M[i];
-      // Cohésion (vers le centre) + alignement (vitesse du banc).
       const ax = (s.center.x - m.pos.x) * s.cohesion + (schoolVel.x - m.vel.x) * s.alignment;
       const ay = (s.center.y - m.pos.y) * Math.max(0.65, s.cohesion * 2);
       const az = (s.center.z - m.pos.z) * s.cohesion + (schoolVel.z - m.vel.z) * s.alignment;
       let sx = 0, sy = 0, sz = 0;
-      // Séparation (voisins proches).
       for (let j = 0; j < M.length; j++) {
         if (j === i) continue;
         const o = M[j];
@@ -577,18 +526,16 @@ export class FishLife {
       m.vel.x += (ax + sx * s.separation + rand(-0.15, 0.15)) * dt;
       m.vel.y += (ay + sy * s.separation) * dt;
       m.vel.z += (az + sz * s.separation + rand(-0.15, 0.15)) * dt;
-      // Effarouchement ANTICIPÉ : le banc s'écarte de la trajectoire du bateau
-      // avant qu'il n'arrive dessus.
       let vmax = 2.6;
       const th = this._boatThreat(m.pos.x, m.pos.z, s.guided ? 16 : BOAT_FLEE_R);
       if (th) {
+        strongestThreat = Math.max(strongestThreat, th.u);
         if (th.u >= 0.25) threatenedMembers++;
         m.vel.x += th.ax * th.u * BOAT_FLEE_STR * dt;
         m.vel.z += th.az * th.u * BOAT_FLEE_STR * dt;
-        m.vel.y -= th.u * 3 * dt;   // ils plongent aussi
+        m.vel.y -= th.u * 3 * dt;
         vmax = 7.5;
       }
-      // Vitesse bornée (relevée en fuite).
       const sp = Math.hypot(m.vel.x, m.vel.y, m.vel.z) || 1e-5;
       const cl = THREE.MathUtils.clamp(sp, 0.4, vmax) / sp;
       m.vel.multiplyScalar(cl);
@@ -598,12 +545,14 @@ export class FishLife {
       orientTo(m.g, m.vel);
       m.mixer.update(dt);
     }
-    // Les cinq bancs du tutoriel restent ancrés jusqu'au passage au centre ;
-    // leur dispersion groupée est déclenchée explicitement par FirstVoyageGuide.
-    if (s.guidedEncounter) return;
+    // Pour le tuto, la validation suit enfin ce que le joueur voit : dès
+    // qu'un poisson fuit franchement la trajectoire du bateau, ce banc a été
+    // réellement traversé. Le guide dispersera ensuite les cinq bancs ensemble.
+    if (s.guidedEncounter) {
+      if (strongestThreat >= 0.3 && this.boat?.speedKn >= 3) s.encounterHit = true;
+      return;
+    }
 
-    // Une simple esquive individuelle ne compte pas : le bateau doit faire
-    // réagir ensemble une part significative d'un vrai banc (3 poissons min).
     const scattering = M.length >= 3
       && threatenedMembers / M.length >= (s.guided ? 0.22 : 0.4);
     if (s.scattered) {
@@ -636,10 +585,9 @@ export class FishLife {
     }
   }
 
-  // Choisit un point fixe dans le monde. Quand le bateau est proche, le requin
-  // peut venir examiner sa zone, mais seulement à partir d'un instantané de sa
-  // position. Plusieurs candidats sont comparés pour éviter un demi-tour brutal.
   _setSharkWaypoint(f, leaving = false) {
+    // Waypoints are fixed in world space; the shark may inspect a boat snapshot
+    // but never inherits the boat's motion or continuously chases its position.
     const b = this.boat;
     f.waypointAge = 0;
 
@@ -702,8 +650,6 @@ export class FishLife {
     let desiredSpeed = f.leaving ? f.cruiseSpeed * 1.08 : f.cruiseSpeed;
     let turnRate = f.turnRate;
 
-    // Le bateau influe seulement comme obstacle local. Sa vitesse ne devient
-    // jamais celle du requin et ne déplace pas ses points de passage.
     const threat = this._boatThreat(f.pos.x, f.pos.z, SHARK_AVOID_R);
     if (threat) {
       const avoidanceHeading = Math.atan2(threat.ax, threat.az);
@@ -740,7 +686,6 @@ export class FishLife {
     }
 
     f.heading += Math.sin(t * f.wanderFreq + f.wanderPhase) * 0.015 * dt;
-    // Effarouchement ANTICIPÉ : vire à l'écart de la trajectoire du bateau et détale.
     let speed = f.speed;
     const th = this._boatThreat(f.pos.x, f.pos.z);
     if (th) {
@@ -766,8 +711,6 @@ export class FishLife {
     }
     const cam = this.camera.position;
 
-    // Directeur d'apparition par espèce : chaque espèce a son propre rythme et
-    // n'apparaît que dans ses états de mer.
     for (const key of Object.keys(SPECIES)) {
       const sp = SPECIES[key];
       if (!this.protos[key] || !sp.presets.includes(preset)) continue;

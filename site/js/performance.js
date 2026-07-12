@@ -43,7 +43,7 @@ function storedMode() {
 }
 
 function rememberMode(mode) {
-  try { localStorage.setItem(QUALITY_STORAGE_KEY, mode); } catch { /* stockage indisponible */ }
+  try { localStorage.setItem(QUALITY_STORAGE_KEY, mode); } catch {  }
 }
 
 function percentile(values, ratio) {
@@ -68,8 +68,6 @@ export class PerformanceManager {
     this.targetFps = targetFps;
     this.onChange = onChange;
     const params = new URLSearchParams(location.search);
-    // L'URL est une surcharge explicite (benchmark/lien partagé), sinon le choix
-    // durable de l'utilisateur est restauré. Toute valeur inconnue revient à Auto.
     const requested = params.has('quality') ? params.get('quality') : storedMode();
     const requestedTier = PROFILES.findIndex(profile => profile.id === requested);
     this.auto = requestedTier < 0;
@@ -116,13 +114,8 @@ export class PerformanceManager {
     this.lastChange = this.lastAdjust;
   }
 
-  // Vide les fenêtres de mesure. À appeler après chaque changement de qualité pour
-  // que la décision suivante porte sur le nouveau niveau, pas sur des frames
-  // périmées : sinon un pic transitoire cascade en plusieurs rétrogradations (le
-  // buffer met ~3 s à se vider alors que l'on réévalue toutes les 1,5 s), et
-  // l'à-coup de réallocation d'`applyQuality`, appliqué dans la frame mesurée,
-  // fausse la mesure d'après.
   _resetSamples() {
+    // Never let measurements from the previous quality level trigger another change.
     this.frameTimes.length = 0;
     this.cpuTimes.length = 0;
     this.gpuTimes.length = 0;
@@ -187,20 +180,14 @@ export class PerformanceManager {
     const gpu95 = percentile(this.gpuTimes, 0.9);
     this.lastAdjust = now;
 
-    // On décide sur le travail réel par frame, pas sur l'intervalle rAF : celui-ci
-    // est plancher au VSync (≈16,7 ms à 60 Hz) et pollué par des à-coups que baisser
-    // la qualité ne corrige pas (GC, compositeur), s'en servir comme déclencheur
-    // faisait rétrograder sans fin. Avec timer GPU on mesure directement la charge
-    // (symétrique dans les deux sens). Sans timer, on se rabat sur le CPU réel plus
-    // la *médiane* de l'intervalle rAF : une médiane franchement au-dessus du budget
-    // = frames réellement perdues en continu (on est GPU-bound), insensible à un pic
-    // isolé ; et on n'autorise la remontée que si les frames tardives restent rares.
     let overloaded, comfortable;
     if (gpu95) {
       const work = Math.max(gpu95, cpu95);
       overloaded = work > budget * 1.05;
       comfortable = work < budget * 0.72;
     } else {
+      // rAF is VSync-limited, so use sustained median lateness instead of spikes
+      // when direct GPU timing is unavailable.
       const frameMedian = percentile(this.frameTimes, 0.5);
       const frameP90 = percentile(this.frameTimes, 0.9);
       overloaded = cpu95 > budget * 1.05 || frameMedian > budget * 1.25;

@@ -40,9 +40,7 @@ export class WeatherEffects {
     this.rain.renderOrder = 8;
     scene.add(this.rain);
 
-    // Rideau volumétrique à l'horizon. Le brouillard natif de Three.js ne
-    // touche pas le HDR de fond : cette ceinture relie visuellement le ciel
-    // et la mer au même niveau, puis s'efface progressivement vers le zénith.
+    // Native fog does not affect the HDR background, so this belt joins sea and sky.
     this.horizonMistMaterial = new THREE.ShaderMaterial({
       uniforms: {
         uStorm: { value: 0 },
@@ -107,8 +105,6 @@ export class WeatherEffects {
     this.bolt.renderOrder = 9;
     scene.add(this.bolt);
 
-    // Éclairage local très contenu : l'ancien flash puissant se reflétait sur
-    // l'eau et détournait l'attention de l'éclair lui-même.
     this.light = new THREE.PointLight(0xc9e6ff, 0, 260, 2);
     scene.add(this.light);
     this.rainVeil = document.createElement('div');
@@ -141,9 +137,6 @@ export class WeatherEffects {
     if (this._forward.lengthSq() < 0.01) this._forward.set(0, 0, 1);
     this._forward.normalize();
     this._right.set(this._forward.z, 0, -this._forward.x);
-    // La majorité des éclairs d'un orage ne frappent pas à moins de 200 m.
-    // On varie donc la distance acoustique (et le délai du tonnerre) tout en
-    // gardant le sprite dans le volume visible de la scène brumeuse.
     const distanceRoll = Math.random();
     const acousticDistance = distanceRoll < 0.22
       ? 140 + Math.random() * 260
@@ -273,7 +266,6 @@ export class WeatherEffects {
     if (this.flashTime < this.flashDuration) {
       this.flashTime += dt;
       const t = this.flashTime;
-      // Double impulsion courte, plus organique qu'un simple fondu.
       flash = Math.max(
         Math.exp(-t * 24),
         t > 0.12 ? 0.62 * Math.exp(-(t - 0.12) * 32) : 0,

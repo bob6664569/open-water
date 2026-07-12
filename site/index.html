@@ -8,7 +8,6 @@
 <meta name="theme-color" content="#06121f">
 <link rel="canonical" href="https://boat.trilogik.net/">
 
-<!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Open Water">
 <meta property="og:title" content="Open Water, real-time 3D boat simulator in your browser">
@@ -19,7 +18,6 @@
 <meta property="og:image:height" content="975">
 <meta property="og:image:alt" content="A motoryacht cutting across a sunlit turquoise sea in the Open Water simulator.">
 
-<!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:creator" content="@bob6664569">
 <meta name="twitter:title" content="Open Water, real-time 3D boat simulator in your browser">
@@ -30,10 +28,7 @@
   :root { --glass: rgba(5, 20, 32, .58); --line: rgba(255,255,255,.16); --ice: #a8e3ff; --ease: cubic-bezier(.16,1,.3,1);
     --control-bg: rgba(5, 20, 32, .42); --control-line: rgba(255,255,255,.2);
     --control-shadow: 0 5px 18px rgba(0,0,0,.18); --control-active: rgba(124,207,244,.14);
-    /* dock caché sous l'écran au départ ; --dock-lift remonte qualité/achievements en même temps
-       que le sélecteur remonte (--dock-slide 100%->0%). Bascule via body.dock-revealed. */
     --dock-lift: 0px; --dock-slide: 100%;
-    /* intensité des vagues (#controls) cachée hors du bord droit, entre plus tard par la droite */
     --controls-slide: calc(100% + 18px); }
   body.dock-revealed { --dock-lift: 76px; --dock-slide: 0%; }
   body.controls-revealed { --controls-slide: 0px; }
@@ -41,7 +36,7 @@
     -webkit-touch-callout: none; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #06121f; overscroll-behavior: none; }
   body { color: rgba(255,255,255,.94); font-family: "Avenir Next", Avenir, sans-serif; }
-  canvas { display: block; touch-action: none; } /* le canvas gère lui-même orbite/pincement */
+  canvas { display: block; touch-action: none; }
   #hud { position: fixed; z-index: 8; top: 18px; left: 18px; user-select: none; pointer-events: none; text-shadow: 0 1px 5px rgba(0,0,0,.5); }
   #hud .speed { font: 600 34px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: -.05em; }
   #hud .speed small { font-size: 12px; font-weight: 500; letter-spacing: .08em; opacity: .68; }
@@ -53,7 +48,7 @@
   #throttle i.reverse { background: #ff9d7f; }
   #controls { position: fixed; z-index: 8; top: 18px; right: 18px; display: grid; gap: 9px; justify-items: end; pointer-events: none;
     transform: translateX(var(--controls-slide)); }
-  #controls > * { pointer-events: auto; } /* orbite possible dans les interstices */
+  #controls > * { pointer-events: auto; }
   .glass { background: var(--glass); box-shadow: 0 14px 38px rgba(0,0,0,.2); backdrop-filter: blur(16px) saturate(125%); -webkit-backdrop-filter: blur(16px) saturate(125%); }
   .control-title { font-size: 9px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.54); }
   .wave-option:focus-visible, .vessel-arrow:focus-visible { outline: 2px solid var(--ice); outline-offset: 3px; }
@@ -85,7 +80,6 @@
     letter-spacing: .08em; text-transform: uppercase; pointer-events: none; opacity: 0; transform: translate(-50%, 4px);
     transition: opacity .22s var(--ease), transform .22s var(--ease); }
   #camera-status.visible { opacity: 1; transform: translate(-50%, 0); }
-  /* ---- qualité : petit instrument de bord, volontairement discret et monochrome ---- */
   #quality-control { --quality-tone: rgba(228,241,250,.82); position: fixed; z-index: 11; left: 18px; bottom: calc(14px + var(--dock-lift));
     height: 36px; min-width: 92px; display: flex; align-items: center; gap: 8px; padding: 0 19px 0 9px; border-radius: 10px;
     color: rgba(224,239,249,.58); background: rgba(3,16,27,.44); box-shadow: 0 6px 16px rgba(0,0,0,.14);
@@ -109,7 +103,6 @@
     letter-spacing: .08em; text-transform: uppercase; transition: color .25s; }
   #quality-select { position: absolute; z-index: 3; inset: 0; width: 100%; height: 100%; border: 0;
     opacity: .001; cursor: pointer; }
-  /* ---- achievements : journal de bord discret, persistant et non modal ---- */
   #achievements-button { position: fixed; z-index: 12; right: 18px; left: auto; bottom: calc(14px + var(--dock-lift));
     height: 36px; min-width: 130px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid rgba(228,241,250,.09);
     border-radius: 10px; color: rgba(224,239,249,.62); background: rgba(3,16,27,.48);
@@ -226,7 +219,6 @@
     font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .17em; text-transform: uppercase; }
   .achievement-toast strong { display: block; margin-top: 4px; font: italic 400 17px/1 Georgia, "Times New Roman", serif; }
   .achievement-toast em { display: block; margin-top: 5px; color: rgba(224,242,250,.58); font: normal 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; }
-  /* ---- nouveau bateau : callout ancré visuellement au sélecteur ---- */
   #vessel-unlock-alert { position: fixed; z-index: 14; left: 50%; bottom: calc(88px + env(safe-area-inset-bottom, 0px));
     width: min(322px, calc(100vw - 28px)); min-height: 68px; display: grid; grid-template-columns: 46px minmax(0, 1fr);
     align-items: center; gap: 13px; padding: 12px 16px 12px 12px; border: 1px solid rgba(190,233,250,.24); border-radius: 16px;
@@ -263,7 +255,6 @@
   .vessel-unlock-copy em { display: block; margin-top: 5px; color: rgba(220,239,247,.5); font: normal 7px/1.2 "SF Mono", ui-monospace, Menlo, monospace; }
   #vessel-selector.new-vessel { animation: vessel-selector-beacon 1.1s ease-out 2; }
   @keyframes vessel-selector-beacon { 45% { box-shadow: 0 -13px 44px rgba(91,193,226,.2), inset 0 1px rgba(193,235,250,.1); } }
-  /* ---- sélecteur de flotte : une ligne d'horizon sur toute la largeur ---- */
   #vessel-selector { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; height: 76px;
     display: grid; grid-template-columns: minmax(64px, 9vw) 1fr minmax(64px, 9vw); align-items: stretch;
     border: 0; background: rgba(6,22,36,.46);
@@ -300,7 +291,6 @@
   #vessel-selector.changing-prev #boatname { animation: vessel-from-left .34s var(--ease); }
   @keyframes vessel-from-right { from { opacity: 0; transform: translateX(22px); } }
   @keyframes vessel-from-left { from { opacity: 0; transform: translateX(-22px); } }
-  /* ---- accueil : une invitation nautique, révélée une fois la scène prête ---- */
   #welcome { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 28px;
     overflow: hidden; isolation: isolate; text-align: center;
     background: linear-gradient(180deg, rgba(2,12,21,.46), rgba(2,14,24,.18) 44%, rgba(2,13,23,.7));
@@ -313,7 +303,6 @@
     mix-blend-mode: soft-light; }
   body.started #welcome { opacity: 0; visibility: hidden; pointer-events: none; }
   .welcome-cta { position: relative; display: inline-flex; }
-  /* le trait est ancré au centre du bouton (pleine largeur, derrière), donc aligné à toutes les tailles de fenêtre */
   .welcome-horizon { position: absolute; z-index: -1; top: 50%; left: 50%; width: 100vw; height: 1px;
     transform: translate(-50%, -50%); pointer-events: none;
     background: linear-gradient(90deg, transparent, rgba(200,237,250,.5) 24%, rgba(255,255,255,.72) 50%, rgba(200,237,250,.5) 76%, transparent);
@@ -371,24 +360,16 @@
   body.awaiting-start #achievements-button, body.awaiting-start #achievements-panel,
   body.awaiting-start #achievement-toast-region { opacity: 0; pointer-events: none; }
   #hud, #controls, #vessel-selector, #help, #drive { transition: opacity .55s .32s var(--ease); }
-  /* le sélecteur remonte du bas quelques secondes après le départ (body.dock-revealed) */
   #vessel-selector { transition: opacity .55s .32s var(--ease), transform .6s var(--ease); }
-  /* l'intensité des vagues glisse depuis la droite, plus tard et plus lentement (body.controls-revealed) */
   #controls { transition: opacity .55s .32s var(--ease), transform .9s var(--ease); }
-  /* l'aide clavier s'efface en douceur ~20 s après le départ, puis ne revient plus de la session */
   #help.help-dismissed { opacity: 0; transition: opacity 1s var(--ease); }
   @keyframes welcome-rise { from { opacity: 0; transform: translateY(16px); } }
   @keyframes welcome-float { 50% { transform: translateY(-6px) rotate(-1deg); } }
   @keyframes sound-wave { to { transform: scaleY(.42); opacity: .55; } }
-  /* ---- premier départ : invitation cinématique à explorer, révélée au centre
-     ligne par ligne puis effacée (cf. playVoyageIntro dans main.js). N'intercepte
-     aucun clic. En tactile, décalée vers le haut (cf. media query) pour laisser le
-     centre au tutoriel de conduite #drive-tutorial. ---- */
   #voyage-intro { position: fixed; z-index: 12; inset: 0; display: grid; place-items: center;
     padding: 30px; text-align: center; pointer-events: none; opacity: 0;
     transition: opacity 1.3s var(--ease); }
   #voyage-intro[hidden] { display: none; }
-  /* halo sombre discret qui concentre le regard et garde le texte lisible sur ciel/mer clairs */
   #voyage-intro::before { content: ""; position: absolute; z-index: -1; inset: 0; opacity: 0;
     background: radial-gradient(ellipse 60% 46% at 50% 45%, rgba(2,12,21,.6), transparent 72%);
     transition: opacity 1.3s var(--ease); }
@@ -407,16 +388,12 @@
   .voyage-intro-sub { max-width: 500px; margin: 20px auto 0; font-family: Georgia, "Times New Roman", serif;
     font-size: clamp(15px, 2vw, 19px); font-style: italic; line-height: 1.5; color: rgba(233,246,252,.82);
     text-shadow: 0 2px 16px rgba(0,0,0,.5); }
-  /* révélation progressive : chaque ligne monte et se dé-floute, en cascade */
   #voyage-intro.playing .voyage-intro-kicker { animation: voyage-reveal 1.1s .15s both var(--ease); }
   #voyage-intro.playing .voyage-intro-lead { animation: voyage-reveal 1.25s .42s both var(--ease); }
   #voyage-intro.playing .voyage-intro-sub { animation: voyage-reveal 1.25s .78s both var(--ease); }
   #voyage-intro.leaving .voyage-intro-inner { transform: translateY(-4.6vh); transition: transform 1.5s var(--ease); }
   @keyframes voyage-reveal { from { opacity: 0; transform: translateY(16px); filter: blur(7px); }
     to { opacity: 1; transform: none; filter: blur(0); } }
-  /* ---- première traversée : une carte de navigation sobre, plus proche d'un
-     journal de bord que d'un tutoriel de jeu. Elle accompagne uniquement le
-     premier demi-mille et s'efface dès que l'océan libre est compris. ---- */
   #first-voyage-guide { position: fixed; z-index: 26;
     top: calc(env(safe-area-inset-top, 0px) + 10px); left: 50%;
     box-sizing: border-box; width: min(420px, calc(100vw - 220px)); height: 104px;
@@ -435,7 +412,6 @@
   #first-voyage-guide.waypoint-reached { border-color: rgba(204,243,255,.38);
     box-shadow: 0 16px 46px rgba(0,0,0,.22), 0 0 0 1px rgba(168,227,255,.08),
       0 0 38px rgba(116,202,238,.14), inset 0 1px rgba(255,255,255,.1); }
-  /* Les récompenses se rangent sous la mission : elles ne la déplacent jamais. */
   body:has(#first-voyage-guide.visible) #achievement-toast-region {
     top: calc(env(safe-area-inset-top, 0px) + 126px); }
   body:has(#first-voyage-guide.visible.collapsed) #achievement-toast-region {
@@ -487,12 +463,11 @@
   .wake { stroke-dasharray: 24 10; animation: wake 1.1s linear infinite; }
   @keyframes float { 50% { transform: translateY(-5px) rotate(-1deg); } }
   @keyframes wake { to { stroke-dashoffset: -34; } }
-  /* ---- pilotage gestuel : le pouce devient le manche gaz + direction ---- */
   #drive { position: fixed; z-index: 9; left: 0; right: 0; bottom: 76px;
     height: 176px; display: none; place-items: end center; padding-bottom: 16px;
     pointer-events: none; user-select: none; -webkit-user-select: none; }
   body.touch #drive { display: grid; }
-  body.touch #help { display: none; }              /* les raccourcis clavier n'ont pas de sens */
+  body.touch #help { display: none; }
   #gesture-drive { position: relative; width: 94px; height: 94px; padding: 0; border: 0;
     border-radius: 50%; color: white; background: transparent; pointer-events: auto;
     touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; }
@@ -591,8 +566,6 @@
   @keyframes arrow-cue { 0%, 100% { transform: translate(-50%, -5px); opacity: .5; }
     55% { transform: translate(-50%, 7px); opacity: 1; } }
   @keyframes cue-breathe { 50% { opacity: .55; } }
-  /* ---- panneaux du haut resserrés sur tactile ---- */
-  /* intensité des vagues : garde uniquement les 4 icônes */
   body.touch #wave-control { padding: 0; border: 0; background: transparent; box-shadow: none;
     backdrop-filter: none; -webkit-backdrop-filter: none; }
   body.touch #wave-control .control-title { display: none; }
@@ -616,9 +589,8 @@
     #hud { top: 12px; left: 12px; } #hud .speed { font-size: 28px; } .bar { width: 116px; }
     #controls { top: 12px; right: 12px; gap: 7px; }
     #wave-control { padding: 9px; }
-    .wave-option { width: 44px; height: 44px; } /* cible tactile confortable */
+    .wave-option { width: 44px; height: 44px; }
     #help { display: none; }
-    /* invitation décalée vers le haut : le tutoriel de conduite occupe le centre en tactile */
     #voyage-intro { padding: 22px; place-items: start center; }
     .voyage-intro-inner { width: min(440px, 100%); margin-top: 15vh; transform: none; }
     .voyage-intro-lead { font-size: clamp(30px, 9vw, 44px); }
@@ -632,7 +604,6 @@
     body.dock-revealed { --dock-lift: 72px; }
     #quality-control { left: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--dock-lift)); height: 34px;
       min-width: 84px; padding-left: 7px; gap: 6px; background: rgba(3,17,28,.48); }
-    /* identique au desktop : pilule complète avec texte, ancrée en bas à droite */
     #achievements-button { right: 12px; left: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px) + var(--dock-lift)); }
     #achievement-trial-prompt { right: 12px; bottom: calc(58px + env(safe-area-inset-bottom, 0px) + var(--dock-lift));
       width: min(236px, calc(100vw - 24px)); }
@@ -684,8 +655,6 @@
     </a>
   </div>
 </section>
-<!-- Premier départ : une invitation cinématique révélée au centre, puis effacée.
-     N'intercepte aucun clic (pointer-events:none). Jouée par playVoyageIntro(). -->
 <div id="voyage-intro" aria-hidden="true" hidden>
   <div class="voyage-intro-inner">
     <span class="voyage-intro-kicker"><span></span> Your voyage begins <span></span></span>
@@ -786,8 +755,6 @@
   </button>
 </nav>
 <div id="camera-status" role="status" aria-live="polite"></div>
-<!-- Contenu de base (commandes toujours disponibles) ; « B boat » et « 1–4 sea »
-     sont ajoutés par buildHelpHint() une fois le bateau / les vagues débloqués. -->
 <div id="help">W / ↑ throttle · S / ↓ reverse · A D / ← → rudder · Space stop · C camera / cinema · Mouse orbit · Wheel zoom · R reset · L log</div>
 <div id="drive" role="group" aria-label="Touch controls">
   <button id="gesture-drive" type="button" aria-label="Touch here, then slide to steer and control throttle" aria-valuetext="Neutral">

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 
-// grappe de gouttelettes (petits points nets, tailles variées)
 function makeDropletTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -18,7 +17,6 @@ function makeDropletTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-// nappe de brume irrégulière (paquet de disques doux)
 function makeMistTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -42,13 +40,10 @@ function makeMistTexture() {
   return new THREE.CanvasTexture(c);
 }
 
-// Fragment d'écume : une constellation de gouttes et quelques voiles très
-// doux. Il n'y a volontairement aucune masse ronde opaque dans la texture.
 function makeImpactFoamTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const ctx = c.getContext('2d');
-  // halos internes : seulement visibles là où beaucoup de fragments se croisent
   for (let i = 0; i < 7; i++) {
     const x = 22 + Math.random() * 84, y = 24 + Math.random() * 80;
     const r = 12 + Math.random() * 20;
@@ -57,7 +52,6 @@ function makeImpactFoamTexture() {
     g.addColorStop(1, 'rgba(238,249,255,0)');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
   }
-  // grumeaux et gouttes, avec une distribution volontairement déséquilibrée
   for (let i = 0; i < 38; i++) {
     const angle = Math.random() * Math.PI * 2;
     const radius = Math.pow(Math.random(), 0.65) * 48;
@@ -91,7 +85,6 @@ function makeBubbleTexture() {
   return tex;
 }
 
-// ---------------- particules à attributs (taille/alpha par gouttelette) ----------------
 const SPRAY_VERT = /* glsl */`
   attribute float aSize;
   attribute float aAlpha;
@@ -198,7 +191,6 @@ class ParticleSystem {
     at.aSize.needsUpdate = true;
   }
 
-  // waterKill: éteint la particule quand elle touche la surface
   update(dt, wf = null) {
     this.time += dt;
     this.points.material.uniforms.uTime.value = this.time;
@@ -236,9 +228,6 @@ class ParticleSystem {
   }
 }
 
-// Jet sous-marin des hélices: microbulles entraînées dans un cône turbulent.
-// La composante tangentielle à la naissance dessine des filaments hélicoïdaux
-// sans imposer une géométrie opaque dans l'eau.
 class PropellerWash {
   constructor(scene, waveField, max = 1700) {
     this.wf = waveField;
@@ -270,8 +259,6 @@ class PropellerWash {
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
     this.points.renderOrder = 3;
-    // Exclusivement dans la passe de réfraction: un rendu simultané dans la
-    // scène principale laisserait voir les bulles « devant » la surface.
     this.points.layers.set(1);
     scene.add(this.points);
     this.activeLimit = max;
@@ -321,7 +308,7 @@ class PropellerWash {
       const phase = this.seed[i] * 37 + age * 8.5;
       this.vel[o] += Math.sin(phase) * 0.22 * dt;
       this.vel[o + 2] += Math.cos(phase * 1.13) * 0.22 * dt;
-      this.vel[o + 1] += 0.13 * dt; // remontée lente des microbulles
+      this.vel[o + 1] += 0.13 * dt;
       const drag = Math.max(0, 1 - 0.48 * dt);
       this.vel[o] *= drag; this.vel[o + 1] *= drag; this.vel[o + 2] *= drag;
       this.pos[o] += this.vel[o] * dt;
@@ -342,7 +329,6 @@ class PropellerWash {
   }
 }
 
-// ---------------- émission pilotée par l'état du bateau ----------------
 export class BoatEffects {
   constructor(scene, waveField, boat) {
     this.boat = boat;
@@ -377,7 +363,6 @@ export class BoatEffects {
     this._waterVel = new THREE.Vector3();
     this._relVel = new THREE.Vector3();
     this._lastSpec = boat.spec.id;
-    // Exposé en mode `?debug` pour faciliter l'inspection des effets.
     this.turnEnergy = 0;
     this._impactCooldown = 0;
     this._impactQueue = [];
@@ -435,8 +420,7 @@ export class BoatEffects {
     this._relVel.copy(b.vel).sub(this._waterVel);
     const forwardSpeed = Math.max(0, this._relVel.dot(this._f));
 
-    // Les moyeux du modèle sont la source de vérité. Pour les modèles sans
-    // hélice animée détectable, on conserve l'ancrage hydrodynamique central.
+    // Prefer detected model propeller hubs; use the hydrodynamic anchor as fallback.
     const rigProps = b.visualRig?.getPropellerWorldPositions(this._propPositions);
     if (!rigProps?.length) {
       this._propPositions.length = 1;
@@ -444,8 +428,6 @@ export class BoatEffects {
       b.worldPoint(fx.prop, this._propPositions[0]);
     }
 
-    // Turbulence immergée, liée au régime moteur et à la vitesse du bateau.
-    // Le jet part à l'opposé de la poussée (vers la poupe en marche avant).
     const propPower = Math.abs(b.throttle) * b.propWet;
     if (propPower > 0.035) {
       const speedFactor = THREE.MathUtils.clamp(speed / Math.max(b.spec.maxPropSpeed, 1), 0, 1);
@@ -460,8 +442,6 @@ export class BoatEffects {
       }
     }
 
-    // Un impact n'apparaît pas en une seule frame : le V de coque ouvre l'eau
-    // progressivement. Les lobes mis en attente naissent sur ~0,2 s.
     for (let i = this._impactQueue.length - 1; i >= 0; i--) {
       const q = this._impactQueue[i];
       q.delay -= dt;
@@ -471,8 +451,6 @@ export class BoatEffects {
       this._impactQueue.splice(i, 1);
     }
 
-    // Embruns de carène: on échantillonne les points de flottabilité réellement
-    // immergés dans le tiers avant. Il n'existe plus deux jets visuels fixes.
     this._bowContacts.length = 0;
     if (forwardSpeed > 2.2) {
       for (const contact of b.spec.buoyPoints) {
@@ -511,7 +489,6 @@ export class BoatEffects {
           0.45,
         );
       }
-      // Une brume brève n'apparaît qu'à vitesse soutenue et reste asymétrique.
       this._bowMistAcc += dt * Math.max(0, forwardSpeed - 5) * 0.32 * contactGain;
       while (this._bowMistAcc >= 1) {
         this._bowMistAcc -= 1;
@@ -532,9 +509,6 @@ export class BoatEffects {
       }
     }
 
-    // Gerbe de virage: la coque comprime l'eau du cote exterieur de la
-    // trajectoire. L'energie combine vitesse, braquage reel, lacet et contact
-    // avec l'eau; braquer a l'arret ne produit donc aucun effet artificiel.
     const steerAmount = THREE.MathUtils.clamp(
       Math.abs(b._effSteer) / Math.max(b.spec.maxSteerRad, 0.001), 0, 1,
     );
@@ -549,10 +523,7 @@ export class BoatEffects {
     const turnSpeed = THREE.MathUtils.smoothstep(
       forwardSpeed, 1.2, Math.max(4.5, b.spec.maxPropSpeed * 0.56),
     );
-    // Au dejaugeage rapide, les points de flottabilite peuvent tous sortir de
-    // l'eau entre deux vagues (`wet == 0`) alors que la turbine/embase est encore
-    // immergee et que la poupe chasse effectivement l'eau. Le meilleur signal
-    // de contact est donc le maximum coque + propulsion, pas `wet` seul.
+    // A planing hull can report dry buoyancy points while its drive still throws water.
     const turnWet = THREE.MathUtils.clamp(Math.max(
       b.wet * 2.2,
       b.propWet * 0.92,
@@ -562,9 +533,6 @@ export class BoatEffects {
     );
     this.turnEnergy = turnEnergy;
     if (turnEnergy > 0.025) {
-      // En convention bateau, un lacet negatif est un virage a gauche: le
-      // flanc exterieur est alors tribord (+right). La barre sert de repli au
-      // tout debut du virage, avant que le lacet soit mesurable.
       const outsideSide = Math.abs(b.angVelB.y) > 0.018
         ? -Math.sign(b.angVelB.y)
         : (Math.sign(b.steer) || 1);
@@ -601,8 +569,6 @@ export class BoatEffects {
         );
       }
 
-      // Fragments bas et plus lourds: ils donnent de l'epaisseur a la lame
-      // d'eau sans former un panache blanc opaque.
       this._turnFoamAcc += dt * (8 + forwardSpeed * 4.3) * turnEnergy;
       while (this._turnFoamAcc >= 1) {
         this._turnFoamAcc -= 1;
@@ -622,9 +588,6 @@ export class BoatEffects {
         );
       }
 
-      // Lame principale: des fragments plus grands et plus rapides forment la
-      // gerbe puissante attendue sur un jet-ski a haute vitesse. Elle reste
-      // strictement dirigee vers l'exterieur du rayon de virage.
       this._turnSheetAcc += dt * (3 + forwardSpeed * 1.8)
         * Math.pow(turnEnergy, 1.08);
       while (this._turnSheetAcc >= 1) {
@@ -646,7 +609,6 @@ export class BoatEffects {
         );
       }
 
-      // La brume n'apparait que dans les virages vraiment charges.
       this._turnMistAcc += dt * Math.max(0, turnEnergy - 0.2)
         * (2.7 + forwardSpeed * 0.72);
       while (this._turnMistAcc >= 1) {
@@ -665,14 +627,10 @@ export class BoatEffects {
         );
       }
     } else {
-      // Evite qu'un reliquat d'accumulateur parte en paquet au prochain virage.
       this._turnSprayAcc = this._turnFoamAcc = 0;
       this._turnSheetAcc = this._turnMistAcc = 0;
     }
 
-    // Sillage de surface: nappe turbulente au tableau et gerbes distinctes
-    // pour chaque hélice réelle. Il commence tôt et monte progressivement avec
-    // la vitesse et la puissance, au lieu d'attendre arbitrairement 10 m/s.
     const forwardPower = Math.max(b.throttle, 0) * b.propWet;
     const sternEnergy = THREE.MathUtils.clamp(
       Math.max(0, forwardSpeed - 1.4) / Math.max(b.spec.maxPropSpeed, 1) * 0.75
@@ -755,14 +713,10 @@ export class BoatEffects {
       }
     }
 
-    // gerbe d'impact quand la coque tape: PLEIN de jets, proportionnel
-    // à la violence de l'impact et à la vitesse
     if (b.slam > 0.8 && this._impactCooldown <= 0) {
       const impact = THREE.MathUtils.clamp((b.slam - 0.65) / 1.35, 0, 1);
       const speedEnergy = THREE.MathUtils.clamp((speed - 2) / 13, 0.15, 1);
       const energy = impact * (0.55 + speedEnergy * 0.7);
-      // Position et normale fournies par le point de flottabilité qui vient de
-      // subir le choc le plus violent, et non par un ancrage visuel à la proue.
       const hitX = b.slamPoint.x, hitY = b.slamPoint.y, hitZ = b.slamPoint.z;
       this._n.copy(b.slamNormal).normalize();
       this._v.copy(b.slamPoint).sub(b.pos);
@@ -773,12 +727,8 @@ export class BoatEffects {
       this._p.set(hitX, hitY + 0.04, hitZ);
       this._burst(this._p, this._r, this._f, b.vel, n * 2, speed);
 
-      // Masse d'écume fragmentée : beaucoup de petits lobes, distribués de
-      // façon asymétrique, qui se recouvrent brièvement sans former de panneau.
       const lobes = 120 + Math.round(energy * 180);
       for (let i = 0; i < lobes; i++) {
-        // La gerbe reste centrée sur le contact. Un impact franchement latéral
-        // expulse surtout vers ce flanc ; sous la quille elle s'ouvre en deux.
         const spraySide = hitSide === 0 || Math.random() < 0.12
           ? (Math.random() < 0.5 ? -1 : 1) : hitSide;
         const across = (Math.random() - 0.5) * b.spec.beam * 0.24;
@@ -808,7 +758,6 @@ export class BoatEffects {
         });
       }
 
-      // Couronne de gouttelettes fines, plus haute et plus large que la lame.
       const crown = 44 + Math.round(energy * 80);
       for (let i = 0; i < crown; i++) {
         const side = hitSide === 0 || Math.random() < 0.18
@@ -833,7 +782,6 @@ export class BoatEffects {
       b.slam = 0;
       b.slamSpeed = 0;
       this._impactCooldown = 0.24;
-      // Brume secondaire en bouquets décentrés, jamais deux disques symétriques.
       const mistPuffs = 12 + Math.round(energy * 10);
       for (let i = 0; i < mistPuffs; i++) {
         const side = hitSide || (Math.random() < 0.5 ? -1 : 1);

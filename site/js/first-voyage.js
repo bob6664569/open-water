@@ -17,7 +17,7 @@ function storageValue() {
 }
 
 function remember(value) {
-  try { localStorage.setItem(GUIDE_STORAGE_KEY, value); } catch { /* optional */ }
+  try { localStorage.setItem(GUIDE_STORAGE_KEY, value); } catch {  }
 }
 
 function horizontalDistance(a, b) {
@@ -74,8 +74,7 @@ function makeBuoy() {
     color: 0x72d7ff, transparent: true, opacity: 0.15,
     depthWrite: false, blending: THREE.AdditiveBlending,
   });
-  // Le pied du cône EST la zone de validation : ARRIVAL_RADIUS est partagé
-  // avec le test de distance plus bas, sans rayon logique invisible.
+  // The visible cone base and the arrival test share ARRIVAL_RADIUS.
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.18, ARRIVAL_RADIUS, 30, 24, 1, true), beamMaterial);
   beam.position.y = 15;
   group.add(beam);
@@ -205,8 +204,6 @@ export class FirstVoyageGuide {
     this.directionArrow.visible = false;
     this.wildlife?.releaseGuidedFlock();
     if (reason !== 'complete') this.fish.removeGuidedSchools(this.guidedSchools);
-    // Une fin normale ne retire pas l'incitation aux états de mer : elle vit
-    // désormais jusqu'au premier changement effectif (géré dans main.js).
     if (reason !== 'complete') document.body.classList.remove('sea-trial-visible');
     this.root?.classList.remove('visible');
     this.root?.setAttribute('aria-hidden', 'true');
@@ -233,8 +230,6 @@ export class FirstVoyageGuide {
       this._placeBuoy(88, 36);
       this._show('WAYPOINT 01 · 03', 'Take a bearing', 'Enter the blue light cone around the buoy.');
     } else if (stage === 'course') {
-      // Franchement sur l'autre bord : cette étape apprend volontairement à
-      // suivre la flèche 3D quand la destination sort du champ.
       this._placeBuoy(115, -195);
       this._show('WAYPOINT 02 · 03', 'Find the second buoy', 'Turn and line up your course with the next blue light.');
     } else if (stage === 'course-two') {
@@ -281,8 +276,6 @@ export class FirstVoyageGuide {
     const remaining = Math.max(0, OPEN_WATER_METERS - this.achievements.state.distanceMeters);
     const leg = THREE.MathUtils.clamp(remaining + 35, 135, 240);
     this._boatBasis();
-    // Dernier changement de rythme : la ronde est sur le bord opposé, à ~58°,
-    // tout en conservant exactement la longueur de jambe nécessaire au 0,5 NM.
     this.target.copy(this.boat.pos)
       .addScaledVector(_forward, leg * 0.53)
       .addScaledVector(_right, -leg * 0.848);
@@ -301,7 +294,6 @@ export class FirstVoyageGuide {
         this._show('WILDLIFE SIGHTED', 'Follow the circling flock', 'Keep the birds in view, or follow the white-blue arrow.');
       }
     }
-    // Cinq bancs ancrés apparaissent assez tôt pour être vus pendant l'approche.
     if (!this.guidedSchools.length && distance <= 260) {
       this._boatBasis();
       const heading = Math.atan2(_right.x, _right.z);
@@ -410,7 +402,19 @@ export class FirstVoyageGuide {
     if (!this.active || dt <= 0) return;
     this.elapsed += dt;
     this.stageElapsed += dt;
-    if (this.elapsed >= START_DELAY / 1000) this.root?.classList.add('visible');
+    // Ne jamais réafficher le panneau après la rencontre. Auparavant cette
+    // ligne remettait `.visible` à chaque frame, juste après que
+    // _finishAfterSchoolDispersal() l'avait retiré.
+    const panelStage = this.stage === 'throttle'
+      || this.stage === 'turn'
+      || this.stage === 'course'
+      || this.stage === 'course-two'
+      || this.stage === 'sighting';
+    if (this.elapsed >= START_DELAY / 1000 && panelStage) {
+      this.root?.classList.add('visible');
+    } else {
+      this.root?.classList.remove('visible');
+    }
     this._updateMarkers();
     this._updateDirectionArrow();
 
@@ -439,11 +443,7 @@ export class FirstVoyageGuide {
 
     if (this.stage === 'sighting') {
       this._spawnSightingLife();
-      // Chacun des cinq bancs est une entrée valide. Le centre global ne sert
-      // qu'à placer les oiseaux et les flèches, jamais à choisir un « bon » banc.
-      const crossedEncounter = this.guidedSchools.some(school => (
-        horizontalDistance(this.boat.pos, school.center) < 18
-      ));
+      const crossedEncounter = this.guidedSchools.some(school => school.encounterHit);
       if (crossedEncounter && this.fish.scatterGuidedSchools(this.guidedSchools)) {
         this._finishAfterSchoolDispersal();
       }

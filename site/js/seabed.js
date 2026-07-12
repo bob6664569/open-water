@@ -2,37 +2,20 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { IS_CONSTRAINED_DEVICE, loadGLTFDeferred } from './deferred-loader.js';
 
-// ---------------------------------------------------------------------------
-// Fond de sable, UNIQUEMENT par mer calme (preset 1). En eau basse et claire,
-// la scène devient un lagon : un grand plan de sable rendu sur la COUCHE 1
-// (réfraction, comme les poissons) apparaît sous la surface, teinté en bleu-vert
-// par l'absorption du shader océan. Il suit le bateau et se fond dans l'eau
-// profonde par un dégradé radial (alpha) → l'eau du large reste inchangée.
-//
-// Le sable accueille des étoiles de mer posées (modèle GLB « asteroid starfish »,
-// CC0 ; repli procédural si absent) : sans nage, elles n'ont de sens que sur un
-// fond, d'où leur présence ici plutôt qu'avec la faune nageuse.
-// ---------------------------------------------------------------------------
-
+// The calm-water seabed follows the boat and fades radially before the deep ocean.
 const CALM_PRESET = 1;
-const SAND_Y = -5.0;        // profondeur du fond (m sous le niveau moyen 0)
-const PLANE = 460;          // grand plan recentré sur le bateau (couvre l'horizon utile)
-const NEAR_R = 46;          // rayon où le sable est pleinement visible (m)
-const FAR_R = 112;          // au-delà : fondu total vers l'eau profonde
+const SAND_Y = -5.0;
+const PLANE = 460;
+const NEAR_R = 46;
+const FAR_R = 112;
 const STAR_URL = './assets/animals/asteroid_starfish_or_seastar.glb';
-const STAR_SPAN = 1.0;      // envergure cible d'une étoile de taille 1 (m)
-const STAR_COUNT = 16;      // étoiles de mer posées sur le sable
-const STAR_R = [8, 104];    // bande de placement/recyclage autour du bateau (m)
-const STAR_RECYCLE = 128;   // au-delà (hors lagon visible) : replacée devant
-// multiplicateur mini/maxi → envergure réelle 0,6–1,35 m (visible à 5 m de fond,
-// où le rouge est fortement absorbé). Biais doux vers les petites (voir exposant).
+const STAR_SPAN = 1.0;
+const STAR_COUNT = 16;
+const STAR_R = [8, 104];
+const STAR_RECYCLE = 128;
 const STAR_SIZE = [0.6, 1.35];
-const STAR_CLUSTER = 0.62;  // proba qu'une étoile s'agrège près d'une congénère
+const STAR_CLUSTER = 0.62;
 
-// Récif procédural : six InstancedMesh donnent des silhouettes réellement
-// différentes tout en gardant un coût fixe et très inférieur à des GLB séparés.
-// Tous les exemplaires sont semés une fois, puis `count` adapte la densité au
-// profil de qualité sans allocation pendant la navigation.
 const REEF_COUNTS = {
   low:    { branch: 6,  fan: 4,  tube: 5,  mound: 5,  algae: 24, rock: 42 },
   medium: { branch: 11, fan: 8,  tube: 9,  mound: 8,  algae: 44, rock: 78 },
@@ -46,7 +29,6 @@ const REEF_CLUSTER = 0.92;
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
-// Étoile de mer procédurale : 5 bras arrondis, légèrement bombée, mate.
 function starfishGeometry() {
   const shape = new THREE.Shape();
   const arms = 5, R = 0.5, r = 0.19;
@@ -61,7 +43,7 @@ function starfishGeometry() {
     depth: 0.05, bevelEnabled: true, bevelThickness: 0.11,
     bevelSize: 0.11, bevelSegments: 3, curveSegments: 6,
   });
-  geo.rotateX(-Math.PI / 2);       // à plat dans le plan xz
+  geo.rotateX(-Math.PI / 2);
   geo.computeVertexNormals();
   return geo;
 }
@@ -78,8 +60,6 @@ function cylinderBetween(a, b, r0, r1) {
   return geo;
 }
 
-// Petit corail arborescent, volontairement peu polygoné : la silhouette et les
-// variations d'échelle font le travail une fois filtrées par la surface.
 function branchingCoralGeometry() {
   const v = (x, y, z) => new THREE.Vector3(x, y, z);
   const parts = [
@@ -96,8 +76,6 @@ function branchingCoralGeometry() {
   return merged;
 }
 
-// Corail éventail : réseau aplati, large et ajouré, immédiatement distinct des
-// branches verticales quand il est vu à travers la surface.
 function fanCoralGeometry() {
   const v = (x, y, z = 0) => new THREE.Vector3(x, y, z);
   const parts = [
@@ -117,8 +95,6 @@ function fanCoralGeometry() {
   return merged;
 }
 
-// Bouquet d'éponges tubulaires, bas et trapu. Les tubes sont ouverts et bordés
-// d'un anneau : même de loin, ils ne se lisent ni comme une algue ni comme un roc.
 function tubeCoralGeometry() {
   const specs = [
     [-0.22, 0, 0.72, 0.13], [0.17, 0.04, 0.95, 0.16],
@@ -159,8 +135,6 @@ function bladeGeometry(width = 0.24, segments = 5) {
   return geo;
 }
 
-// Une instance = une touffe de cinq feuilles larges, inclinées et de hauteurs
-// différentes, afin d'éviter un semis de tiges fines et répétitives.
 function algaeTuftGeometry() {
   const parts = [];
   const heights = [1, 0.72, 0.88, 0.63, 0.79];
@@ -183,8 +157,6 @@ function algaeTuftGeometry() {
 
 function reefMaterial(color, uniforms, { sway = false, glow = null } = {}) {
   const mat = new THREE.MeshStandardMaterial({
-    // La couleur blanche laisse passer intacte la couleur d'instance. Avant,
-    // deux teintes sombres étaient multipliées, d'où les silhouettes uniformes.
     color: 0xffffff, emissive: color,
     emissiveIntensity: glow ?? (sway ? 0.25 : 0.42),
     roughness: 0.88, metalness: 0, vertexColors: true,
@@ -225,7 +197,7 @@ export class Seabed {
     this.wf = waveField;
     this.boat = boat;
     this.time = 0;
-    this.fade = 0;           // enveloppe d'apparition 0..1 (transition douce calm↔reste)
+    this.fade = 0;
 
     this.uniforms = {
       uTime: { value: 0 },
@@ -261,18 +233,18 @@ export class Seabed {
         .replace('#include <color_fragment>', `#include <color_fragment>
           {
             vec2 wxz = vSbW.xz;
-            // moutonnement du sable (deux fréquences) + rides basses
+
             float mott = sbNoise(wxz * 0.13) * 0.55 + sbNoise(wxz * 0.55) * 0.45;
             float ripple = sbNoise(vec2(wxz.x * 1.6 + wxz.y * 0.2, wxz.y * 0.6)) * 0.5 + 0.5;
             vec3 sand = diffuseColor.rgb * (0.80 + 0.4 * mott) * (0.9 + 0.12 * ripple);
-            // caustiques discrètes : réseau mouvant fin
+
             float t = uTime * 0.06;
             float n1 = sbNoise(wxz * 0.9 + vec2(t, t * 0.7));
             float n2 = sbNoise(wxz * 1.7 - vec2(t * 0.6, t));
             float caustic = pow(1.0 - abs(n1 - n2), 5.0);
             sand += caustic * 0.14;
             diffuseColor.rgb = sand;
-            // dégradé radial → alpha : lagon net près du bateau, eau profonde au large
+
             float dist = length(wxz - uCenter);
             float radial = smoothstep(uFar, uNear, dist);
             diffuseColor.a = clamp(radial * uFade, 0.0, 1.0);
@@ -280,14 +252,12 @@ export class Seabed {
     };
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.position.y = SAND_Y;
-    this.mesh.layers.set(1);          // réfraction uniquement (vu À TRAVERS l'eau)
+    this.mesh.layers.set(1);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = -2;       // dessiné avant la faune (fond)
+    this.mesh.renderOrder = -2;
     this.mesh.visible = false;
     scene.add(this.mesh);
 
-    // Étoiles de mer : d'abord le GLB (CC0), sinon repli procédural. On ne sème
-    // qu'une fois la source prête, pour connaître l'échelle du modèle.
     this.stars = [];
     this.starProto = null;
     this.starBaseScale = 1;
@@ -339,14 +309,10 @@ export class Seabed {
       [rock, 'rock', REEF_MAX.rock],
     ];
     const c = this.boat ? this.boat.pos : this.camera.position;
-    // Les espèces partagent de vrais îlots plutôt que de former un semis uniforme.
     this.reefAnchors = Array.from({ length: 13 }, () => {
       const a = rand(0, Math.PI * 2), d = rand(18, 98);
       return { x: c.x + Math.cos(a) * d, z: c.z + Math.sin(a) * d };
     });
-    // Chaque îlot reçoit sa propre « géologie » : poids faible = quelques
-    // pierres seulement, poids fort = plaque caillouteuse. Le rayon indépendant
-    // empêche toutes les poches d'avoir la même taille et la même silhouette.
     this.rockZones = this.reefAnchors.map(anchor => ({
       x: anchor.x + rand(-4, 4), z: anchor.z + rand(-4, 4),
       weight: 0.06 + Math.random() ** 1.7,
@@ -397,15 +363,12 @@ export class Seabed {
     let x, z;
     if (anchor) {
       const a = rand(0, Math.PI * 2);
-      // sqrt(random) remplit toute la surface de la poche sans concentrer tous
-      // les cailloux exactement au centre.
       const d = rockZone ? Math.sqrt(Math.random()) * rockZone.spread
         : item.kind === 'algae' ? rand(0.5, 5.2) : rand(0.25, 3.1);
       x = anchor.x + Math.cos(a) * d;
       z = anchor.z + Math.sin(a) * d;
     } else if (buddy) {
       const a = rand(0, Math.PI * 2);
-      // Les algues forment des herbiers plus larges, les coraux des îlots serrés.
       const d = item.kind === 'algae' ? rand(0.7, 5.2) : rand(0.5, 3.4);
       x = buddy.x + Math.cos(a) * d;
       z = buddy.z + Math.sin(a) * d;
@@ -451,13 +414,13 @@ export class Seabed {
       dummy.scale.set(s * rand(0.75, 1.7), s * rand(0.45, 0.95), s * rand(0.75, 1.55));
       item.mesh.setColorAt(item.index, new THREE.Color(
         [
-          0x77746c, // granit gris chaud
-          0x59646a, // ardoise bleu-gris
-          0x806b58, // roche brune
-          0x9a8060, // grès ocre
-          0x4f514d, // basalte sombre
-          0x8b897d, // calcaire clair
-          0x6e776a, // pierre gris-vert
+          0x77746c,
+          0x59646a,
+          0x806b58,
+          0x9a8060,
+          0x4f514d,
+          0x8b897d,
+          0x6e776a,
         ][(Math.random() * 7) | 0]));
     } else {
       const s = rand(0.75, 1.3);
@@ -491,26 +454,21 @@ export class Seabed {
     }
     loadGLTFDeferred(STAR_URL, (gltf) => {
       const root = gltf.scene;
-      // Sketchfab bake une matrice d'orientation d'AFFICHAGE (rotation arbitraire)
-      // sur le nœud racine → l'étoile se retrouve "debout" sur deux bras. La
-      // géométrie locale est déjà à plat (axe fin = Y) : on neutralise donc cette
-      // rotation racine pour la coucher, puis on recentre.
+      // Sketchfab stores an arbitrary display rotation on the root; local geometry
+      // is already flat, so reset child rotations before grounding the model.
       root.children.forEach(c => c.quaternion.identity());
       root.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(root);
       const size = box.getSize(new THREE.Vector3());
       const ctr = box.getCenter(new THREE.Vector3());
-      // recentrer en x/z, poser la base (min y) à l'origine → repose sur le sable
       root.position.set(-ctr.x, -box.min.y, -ctr.z);
       const wrap = new THREE.Group();
       wrap.add(root);
       wrap.traverse(o => {
         if (!o.isMesh) return;
-        o.layers.set(1);          // réfraction (vu à travers l'eau)
+        o.layers.set(1);
         o.frustumCulled = false;
         o.castShadow = false;
-        // KHR_materials_unlit → MeshBasicMaterial : on repasse en PBR pour que
-        // l'étoile prenne l'éclairage/IBL et la teinte d'absorption sous l'eau.
         if (o.material && o.material.isMeshBasicMaterial) {
           const b = o.material;
           o.material = new THREE.MeshStandardMaterial({
@@ -523,14 +481,13 @@ export class Seabed {
       this.starBaseScale = STAR_SPAN / Math.max(size.x, size.z, 1e-3);
       this._buildStarfish();
     }, (e) => {
-      console.warn('[seabed] GLB étoile non chargé, repli procédural :', e);
+      console.warn('[seabed] starfish GLB failed to load, using procedural fallback:', e);
       this.starGeoFallback = starfishGeometry();
       this.starBaseScale = 1;
       this._buildStarfish();
     });
   }
 
-  // Un mesh d'étoile : GLB cloné (matériau cloné pour varier la teinte), ou repli.
   _makeStarMesh() {
     if (this.starProto) {
       const m = this.starProto.clone(true);
@@ -548,8 +505,6 @@ export class Seabed {
     return m;
   }
 
-  // Une congénère déjà posée dans une bande de distance [rmin,rmax] du bateau,
-  // pour l'agrégation en colonie (sur la même bande que le placement en cours).
   _buddy(self, cx, cz, rmin, rmax) {
     const lo = (rmin - 3) ** 2, hi = (rmax + 7) ** 2;
     const pool = this.stars.filter(o => o !== self && o.placed
@@ -558,47 +513,31 @@ export class Seabed {
     return pool.length ? pool[(Math.random() * pool.length) | 0] : null;
   }
 
-  // Étoiles ANCRÉES AU MONDE (on passe au-dessus). Taille naturellement variée +
-  // placement en colonies (sinon quelques points épars « quadrillent » le fond).
-  //   init    : semées dans tout le lagon (déjà là au démarrage).
-  //   recycle : réapparaissent HORS de la zone visible (r > FAR_R, alpha nul) et
-  //             DEVANT le bateau → émergent en douceur du fondu, jamais « d'un coup ».
   _placeStar(st, cx, cz, recycle) {
-    // taille biaisée (doux) vers les petites, exposant 1.6 : variété sans en
-    // rendre trop minuscules (le minimum reste bien visible).
     const s = STAR_SIZE[0] + Math.random() ** 1.6 * (STAR_SIZE[1] - STAR_SIZE[0]);
     st.s = s; st.m.scale.setScalar(this.starBaseScale * s);
-    // recycle : anneau étroit hors-vue (r > FAR_R, alpha nul), marge sous
-    // STAR_RECYCLE pour que le jitter de colonie ne relance pas un recyclage.
     const rmin = recycle ? FAR_R + 3 : STAR_R[0];
     const rmax = recycle ? STAR_RECYCLE - 10 : STAR_R[1];
     const v = this.boat && this.boat.vel;
     const moving = recycle && v && Math.hypot(v.x, v.z) > 0.6;
     let x, z;
     let buddy = Math.random() < STAR_CLUSTER ? this._buddy(st, cx, cz, rmin, rmax) : null;
-    // au recyclage : ne pas s'agréger à une voisine située DERRIÈRE le bateau
-    // (elle repartirait aussitôt en recyclage, hors champ).
     if (buddy && moving
       && (buddy.m.position.x - cx) * v.x + (buddy.m.position.z - cz) * v.z < 0) buddy = null;
-    if (buddy) {                                   // se pose près d'une voisine
+    if (buddy) {
       const a = rand(0, Math.PI * 2), d = rand(1.2, 6.5);
       x = buddy.m.position.x + Math.cos(a) * d;
       z = buddy.m.position.z + Math.sin(a) * d;
     } else {
-      // bearing : quelconque à l'init ; biaisé vers l'avant du bateau au recyclage
       const a = moving ? Math.atan2(v.z, v.x) + rand(-0.85, 0.85) : rand(0, Math.PI * 2);
       const d = rand(rmin, rmax);
       x = cx + Math.cos(a) * d; z = cz + Math.sin(a) * d;
     }
-    // Garde-fou : au recyclage, forcer la distance dans l'anneau invisible
-    // [FAR_R, STAR_RECYCLE) quel que soit le jitter de colonie → jamais de pop,
-    // jamais de re-recyclage immédiat.
     if (recycle) {
       let dx = x - cx, dz = z - cz, d = Math.hypot(dx, dz) || 1e-3;
       const cl = THREE.MathUtils.clamp(d, FAR_R + 2, STAR_RECYCLE - 3) / d;
       x = cx + dx * cl; z = cz + dz * cl;
     }
-    // GLB : base recentrée à 0 → repose sur le sable ; procédural : centré.
     st.m.position.set(x, SAND_Y + (this.starProto ? 0.01 : 0.06 * s), z);
     st.m.rotation.set(rand(-0.07, 0.07), rand(0, Math.PI * 2), rand(-0.07, 0.07));
     st.spin = rand(-0.04, 0.04);
@@ -622,7 +561,6 @@ export class Seabed {
     this.time += dt;
     const calm = this.wf.preset === CALM_PRESET;
     if (calm && this.time > 1.5) this._loadStarfish();
-    // transition douce (≈0,5 s) à l'entrée/sortie du calme
     this.fade = THREE.MathUtils.damp(this.fade, calm ? 1 : 0, 3.0, dt);
     const on = this.fade > 0.003;
     this.mesh.visible = on;
@@ -636,7 +574,6 @@ export class Seabed {
     this.uniforms.uCenter.value.set(c.x, c.z);
     this.uniforms.uFade.value = this.fade;
 
-    // Étoiles posées au fond : recyclées quand le bateau s'en éloigne trop.
     for (const st of this.stars) {
       st.m.rotation.y += st.spin * dt;
       const dx = st.m.position.x - c.x, dz = st.m.position.z - c.z;

@@ -24,18 +24,12 @@ import { PerformanceManager } from './performance.js';
 import { AchievementManager } from './achievements.js';
 import { FirstVoyageGuide } from './first-voyage.js';
 
-// L'application entière est une surface interactive : aucune sélection native
-// ne doit concurrencer les gestes de pilotage ou de caméra.
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
-// tactile / mobile : entrée principale au doigt → contrôles à l'écran + budget
-// de rendu allégé (le shader océan est fill-rate bound, on plafonne les pixels).
-// `?touch` permet de valider le layout mobile depuis un navigateur desktop.
 const IS_TOUCH = new URLSearchParams(location.search).has('touch')
   || matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 document.body.classList.toggle('touch', IS_TOUCH);
 
-// ---------------- rendu ----------------
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, IS_TOUCH ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -43,7 +37,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.85;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.info.autoReset = false; // cumule toutes les passes d'une frame pour le diagnostic
+renderer.info.autoReset = false;
 document.body.appendChild(renderer.domElement);
 const performanceManager = new PerformanceManager(renderer, { isTouch: IS_TOUCH });
 
@@ -56,10 +50,8 @@ const atmosphereFogColor = new THREE.Color();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 4000);
 camera.position.set(-12, 5, -12);
 
-// ---------------- soleil (recalé par l'HDRI au chargement) ----------------
 const sun = new THREE.Vector3(-0.4, 0.6, -0.7).normalize();
-// Le bateau vise légèrement à tribord du soleil : la caméra de poursuite
-// regarde ainsi presque dans son axe et révèle immédiatement le reflet.
+// Start slightly off the sun axis so the chase camera reveals the reflection immediately.
 const SUN_START_OFFSET = THREE.MathUtils.degToRad(12);
 const startYawFromSun = () => Math.atan2(sun.x, sun.z) + SUN_START_OFFSET;
 const sunLight = new THREE.DirectionalLight(0xfff2dd, 2.0);
@@ -76,9 +68,6 @@ scene.add(sunLight);
 scene.add(sunLight.target);
 let sunSprite = null;
 
-// Léger voile tropical réservé au mode Calm. Le HDRI reste le ciel réel et
-// conserve ses nuages/détails ; cette sphère transparente lui apporte seulement
-// un peu de cyan au zénith et une chaleur pêche près de l'horizon.
 const paradiseSkyMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uCalm: { value: 0 },
@@ -155,7 +144,6 @@ function updateAtmosphere(dt) {
   );
 }
 
-// ---------------- monde ----------------
 const waveField = new WaveField();
 const ocean = new Ocean(waveField, performanceManager.quality);
 scene.add(ocean.mesh);
@@ -169,10 +157,10 @@ const wildlife = new Wildlife(scene, camera, waveField, audio);
 const fish = new FishLife(scene, camera, waveField, boat);
 const dolphins = new Dolphins(scene, camera, waveField, boat);
 const whales = new Whales(scene, camera, waveField);
-const seabed = new Seabed(scene, camera, waveField, boat);   // fond de sable + étoiles (calm)
-const turtles = new Turtles(scene, camera, waveField, boat); // tortues (calm)
-const mantas = new Mantas(scene, camera, waveField, boat);   // raies manta (calm)
-const birds = new Birds(scene, camera, waveField, audio);    // perroquets (calm) + cris
+const seabed = new Seabed(scene, camera, waveField, boat);
+const turtles = new Turtles(scene, camera, waveField, boat);
+const mantas = new Mantas(scene, camera, waveField, boat);
+const birds = new Birds(scene, camera, waveField, audio);
 const achievements = new AchievementManager();
 const achievementFauna = { dolphins, whales, turtles, mantas, fish };
 const firstVoyageGuide = new FirstVoyageGuide({ scene, camera, boat, waveField, achievements, fish, wildlife });
@@ -180,8 +168,6 @@ achievements.button?.addEventListener('click', () => {
   document.body.classList.remove('achievement-trial-visible');
 });
 
-// ---------------- sélecteur de bateaux (dossier assets/boats, touche B) ----
-// convention: nom_LONGUEUR.glb (ex: zefiro_6.5.glb) sinon 6,5 m
 let allBoatList = [];
 let boatList = [];
 let boatIdx = 0;
@@ -277,13 +263,12 @@ function announceNewVessel(fileName, delay = 0) {
   }, delay);
 }
 
-// Cliquer/taper la bulle « nouveau bateau » prend directement la barre du modèle débloqué.
 function takeHelmOfUnlockedVessel() {
   const name = pendingUnlockVessel;
   if (!name) return;
   const idx = boatList.indexOf(name);
   if (idx < 0 || idx === boatIdx) { dismissVesselUnlockAlert(); return; }
-  loadBoatByIndex(idx); // change de bateau et masque la bulle
+  loadBoatByIndex(idx);
 }
 vesselUnlockAlert?.addEventListener('click', takeHelmOfUnlockedVessel);
 
@@ -309,7 +294,6 @@ addEventListener('ocean-boat:reward-unlocked', event => {
     syncSeaControlAccess();
     if (appStarted) revealAfter('controls-revealed', 900);
   }
-  // Débloquer pendant que l'aide est encore affichée : y refléter la nouvelle touche.
   if (helpHint && !IS_TOUCH && !helpHint.classList.contains('help-dismissed')) buildHelpHint();
 });
 
@@ -324,16 +308,9 @@ function finishInitialLoadingWhenReady() {
   }
 }
 
-// Sur desktop, l'aide clavier accompagne le départ puis s'efface : elle reste
-// le temps de repérer les commandes, sans encombrer la scène ensuite. Durée
-// alignée sur l'indication tactile mobile (cf. DRIVE_HINT_IDLE_DELAY).
 const HELP_VISIBLE_DURATION = 20_000;
 let helpDismissTimer = null;
 
-// Les instruments de bord entrent en scène en cascade une fois la scène prise en
-// main, pour ne pas saturer l'écran au départ : le sélecteur de bateau remonte du
-// bas (poussant qualité/achievements), puis l'intensité des vagues glisse depuis
-// la droite quelques secondes plus tard. Cf. body.dock-revealed / .controls-revealed.
 const DOCK_REVEAL_DELAY = 4_000;
 const CONTROLS_REVEAL_DELAY = DOCK_REVEAL_DELAY + 3_000;
 const revealTimers = [];
@@ -349,10 +326,6 @@ function scheduleControlReveals() {
   if (seaControlsUnlocked()) revealAfter('controls-revealed', CONTROLS_REVEAL_DELAY);
 }
 
-// L'aide clavier ne liste que les commandes réellement utiles à l'instant : au
-// tout premier départ, ni le changement de bateau (« B boat ») ni le choix des
-// vagues (« 1–4 sea ») ne sont débloqués, les mentionner enverrait sur des
-// touches sans effet. On (re)compose donc l'indice selon l'état débloqué.
 function buildHelpHint() {
   if (!helpHint) return;
   const segments = ['W / ↑ throttle', 'S / ↓ reverse', 'A D / ← → rudder', 'Space stop', 'C camera / cinema'];
@@ -364,13 +337,12 @@ function buildHelpHint() {
 }
 
 function scheduleHelpDismiss() {
-  // En tactile l'aide est déjà masquée (les raccourcis clavier n'ont pas de sens).
   if (IS_TOUCH || !helpHint) return;
   buildHelpHint();
   clearTimeout(helpDismissTimer);
   helpDismissTimer = setTimeout(() => {
     helpDismissTimer = null;
-    helpHint.classList.add('help-dismissed');   // fondu ~1 s, définitif pour la session
+    helpHint.classList.add('help-dismissed');
     helpHint.setAttribute('aria-hidden', 'true');
   }, HELP_VISIBLE_DURATION);
 }
@@ -386,7 +358,7 @@ function launchExperience() {
   achievements.startVoyage();
   welcome?.setAttribute('aria-hidden', 'true');
   if (welcome) welcome.inert = true;
-  try { audio.start(); } catch { /* l'expérience visuelle reste disponible sans audio */ }
+  try { audio.start(); } catch {  }
   scheduleHelpDismiss();
   scheduleControlReveals();
   playVoyageIntro();
@@ -395,16 +367,10 @@ function launchExperience() {
 
 startButton?.addEventListener('click', launchExperience);
 
-// Carton d'accueil : une invitation cinématique à explorer, jouée une seule fois
-// au tout premier départ (seul avec le smolbot, pas encore de flotte). Révélée au
-// centre puis effacée d'elle-même ; se retire aussi au premier geste de conduite
-// (touche clavier, ou contact sur le pad tactile). En tactile elle est décalée vers
-// le haut (cf. media query) pour ne pas croiser #drive-tutorial — centré — qui, lui,
-// n'apparaît qu'au moment où le doigt se pose sur le pad.
 const voyageIntro = document.getElementById('voyage-intro');
-const VOYAGE_INTRO_DELAY = 1300;   // laisse l'accueil se dissiper (fondu .75 s) avant d'entrer
-const VOYAGE_INTRO_HOLD = 6000;    // pleinement lisible avant de commencer à s'effacer
-const VOYAGE_INTRO_FADE = 1400;    // durée du fondu de sortie (>= transition CSS d'opacité)
+const VOYAGE_INTRO_DELAY = 1300;
+const VOYAGE_INTRO_HOLD = 6000;
+const VOYAGE_INTRO_FADE = 1400;
 const VOYAGE_INTRO_DRIVE_KEYS = new Set(
   ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
 const voyageIntroTimers = [];
@@ -432,7 +398,7 @@ function playVoyageIntro() {
   voyageIntroPlayed = true;
   voyageIntroTimers.push(setTimeout(() => {
     voyageIntro.hidden = false;
-    void voyageIntro.offsetWidth;            // reflow : garantit le fondu depuis l'état masqué
+    void voyageIntro.offsetWidth;
     voyageIntro.classList.add('playing');
     addEventListener('keydown', voyageIntroKeyDismiss, true);
     voyageIntroTimers.push(setTimeout(dismissVoyageIntro, VOYAGE_INTRO_HOLD));
@@ -444,7 +410,7 @@ function storedBoatName() {
 }
 
 function rememberBoat(name) {
-  try { localStorage.setItem(LAST_BOAT_KEY, name); } catch { /* storage may be disabled */ }
+  try { localStorage.setItem(LAST_BOAT_KEY, name); } catch {  }
 }
 
 function storedWaveIntensity() {
@@ -457,7 +423,7 @@ function storedWaveIntensity() {
 }
 
 function rememberWaveIntensity(level) {
-  try { localStorage.setItem(WAVE_INTENSITY_KEY, String(level)); } catch { /* storage may be disabled */ }
+  try { localStorage.setItem(WAVE_INTENSITY_KEY, String(level)); } catch {  }
 }
 
 function storedCamMode() {
@@ -470,10 +436,8 @@ function storedCamMode() {
 }
 
 function rememberCamMode(mode) {
-  try { localStorage.setItem(CAM_MODE_KEY, String(mode)); } catch { /* storage may be disabled */ }
+  try { localStorage.setItem(CAM_MODE_KEY, String(mode)); } catch {  }
 }
-// convention: nom_LONGUEUR.glb ; suffixe "r" = modèle monté à l'envers
-// (ex: motoryacht_10.7r.glb -> 10,7 m, retourné de 180 degrés)
 function updateVesselSelector(spec, direction = 0) {
   boatName.textContent = spec.label;
   boatPosition.textContent = `${String(boatIdx + 1).padStart(2, '0')} / ${String(boatList.length).padStart(2, '0')}`;
@@ -491,10 +455,7 @@ function updateVesselSelector(spec, direction = 0) {
 async function loadBoatByIndex(i, { initial = false, direction = 0 } = {}) {
   if (!boatList.length) return;
   if (!initial) dismissVesselUnlockAlert();
-  // Un changement de modèle en pleine navigation ne doit pas téléporter le
-  // joueur au point de départ. C'était particulièrement visible pendant le
-  // premier voyage : les balises restaient en place, mais le bateau repartait
-  // de l'origine. On conserve donc la continuité de la traversée.
+  // Preserve an active voyage when swapping models instead of resetting world position.
   const navigationState = initial ? null : {
     position: boat.pos.clone(),
     orientation: boat.quat.clone(),
@@ -537,21 +498,14 @@ async function loadBoatByIndex(i, { initial = false, direction = 0 } = {}) {
   }
   orbitDist = spec.camera.chaseDistance;
   topDist = defaultTopDist(spec);
-  // le mode caméra est conservé (restauré depuis localStorage), pas remis à zéro
   camInit = false;
 }
-// Liste statique de la flotte (à tenir à jour en ajoutant/retirant un bateau).
-// Un fichier plutôt qu'un autoindex nginx : marche aussi en hébergement statique.
 fetch('./assets/boats/index.json')
   .then(r => r.json())
   .then(list => {
     allBoatList = list.map(e => e.name).filter(n => /\.glb$/i.test(n)).sort();
     boatList = availableBoatNames();
     const saved = storedBoatName();
-    // Les modèles sans variante mobile sont très lourds en géométrie.
-    // Ne jamais les restaurer automatiquement au démarrage d'un appareil tactile :
-    // le Zefiro sûr s'affiche d'abord, ils restent sélectionnables volontairement.
-    // (frickies_yacht : 11 Mo, 43 meshes d'aménagement intérieur -> même cas.)
     const unsafeMobileStartup = IS_TOUCH && /motoryacht|ss_minnow|frickies_yacht/i.test(saved || '');
     const savedIdx = unsafeMobileStartup ? -1 : boatList.indexOf(saved);
     const z = boatList.findIndex(n => /zefiro/i.test(n));
@@ -560,7 +514,6 @@ fetch('./assets/boats/index.json')
   })
   .catch(() => boat.loadModel('./assets/boat.glb').finally(() => { initialBoatReady = true; finishInitialLoadingWhenReady(); }));
 
-// ---------------- ciel HDRI: fond, IBL, soleil et brume extraits ----------------
 const skyUrl = IS_TOUCH ? './assets/sky_clear_1k.hdr' : './assets/sky_clear_4k.hdr';
 new RGBELoader()
   .setDataType(THREE.HalfFloatType)
@@ -568,7 +521,6 @@ new RGBELoader()
     tex.mapping = THREE.EquirectangularReflectionMapping;
     const { data, width, height } = tex.image;
 
-    // direction du soleil = texel le plus lumineux; brume = bande d'horizon
     let bestLum = -1, bestU = 0, bestV = 0;
     const horizon = [0, 0, 0];
     let hn = 0;
@@ -579,7 +531,7 @@ new RGBELoader()
         const i = (y * width + x) * 4;
         const r = channel(i), g = channel(i + 1), b = channel(i + 2);
         const lum = r * 0.3 + g * 0.6 + b * 0.1;
-        const v = 1 - y / height; // v=1 en haut
+        const v = 1 - y / height;
         if (lum > bestLum) { bestLum = lum; bestU = x / width; bestV = v; }
         if (v > 0.5 && v < 0.54) {
           horizon[0] += r; horizon[1] += g; horizon[2] += b;
@@ -591,7 +543,7 @@ new RGBELoader()
     const lat = (bestV - 0.5) * Math.PI;
     sun.set(Math.cos(lon) * Math.cos(lat), Math.sin(lat),
             Math.sin(lon) * Math.cos(lat));
-    if (sun.y < 0.05) sun.y = 0.05; // garde-fou si convention v inversée
+    if (sun.y < 0.05) sun.y = 0.05;
     sun.normalize();
     ocean.uniforms.uSunDir.value.copy(sun);
     boat.setStartYaw(startYawFromSun(), true);
@@ -599,7 +551,6 @@ new RGBELoader()
 
     const fogC = new THREE.Color(
       horizon[0] / hn, horizon[1] / hn, horizon[2] / hn);
-    // compression HDR -> LDR pour la couleur de brume
     fogC.r = fogC.r / (1 + fogC.r); fogC.g = fogC.g / (1 + fogC.g);
     fogC.b = fogC.b / (1 + fogC.b);
     scene.fog.color.copy(fogC);
@@ -611,7 +562,6 @@ new RGBELoader()
     scene.environment = pmrem.fromEquirectangular(tex).texture;
     pmrem.dispose();
 
-    // disque solaire visible (celui de l'HDRI est voilé par les nuages)
     const sc = document.createElement('canvas');
     sc.width = sc.height = 256;
     const sctx = sc.getContext('2d');
@@ -641,13 +591,9 @@ new RGBELoader()
     finishInitialLoadingWhenReady();
   });
 
-// suit la caméra en XZ: soleil "à l'infini"
 const sunHolder = new THREE.Group();
 scene.add(sunHolder);
 
-// ---------------- passes réflexion / réfraction (couche 1 = bateau) ----------------
-// résolution modérée: assez haute pour éviter les blocs à angle rasant, le
-// filtrage linéaire + la distorsion par les vagues gardent le reflet doux
 const reflRT = new THREE.WebGLRenderTarget(IS_TOUCH ? 512 : 1024, IS_TOUCH ? 512 : 1024);
 const refrRT = new THREE.WebGLRenderTarget(
   Math.floor(innerWidth / 2), Math.floor(innerHeight / 2));
@@ -657,8 +603,8 @@ refrRT.depthTexture = new THREE.DepthTexture(
 refrRT.depthTexture.format = THREE.DepthFormat;
 const mirrorCam = new THREE.PerspectiveCamera();
 mirrorCam.layers.set(1);
-const reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.05);  // y > -0.05
-const refrPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.35); // y < 0.35
+const reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.05);
+const refrPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.35);
 const biasMatrix = new THREE.Matrix4().set(
   0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
 const tmpDir = new THREE.Vector3();
@@ -673,9 +619,6 @@ ocean.uniforms.uCameraNear.value = camera.near;
 ocean.uniforms.uCameraFar.value = camera.far;
 
 function renderWaterPasses(now, quality) {
-  // 0 = synchronisé sur chaque frame. Un seuil de 60 Hz n'est pas équivalent :
-  // les rAF à 16,4–16,7 ms peuvent tomber juste sous 1000/60 et faire sauter une
-  // frame de manière irrégulière, très visible dans la projection du reflet.
   const reflectionDue = quality.reflectionHz <= 0
     || now - lastReflectionAt >= 1000 / quality.reflectionHz;
   const refractionDue = quality.refractionHz <= 0
@@ -690,13 +633,10 @@ function renderWaterPasses(now, quality) {
   const oldParadiseSkyVisible = paradiseSky.visible;
   scene.background = null;
   scene.fog = null;
-  // Le voile est une finition du ciel principal, pas une source de couleur
-  // pour les textures techniques de réflexion/réfraction de l'eau.
   paradiseSky.visible = false;
   renderer.setClearColor(0x000000, 0);
 
   if (refractionDue) {
-    // réfraction: caméra normale, parties immergées du bateau
     camera.layers.set(1);
     renderer.clippingPlanes = [refrPlane];
     renderer.setRenderTarget(refrRT);
@@ -707,17 +647,12 @@ function renderWaterPasses(now, quality) {
   }
 
   if (reflectionDue) {
-    // réflexion: caméra miroir sous le plan y=0
     mirrorCam.position.copy(camera.position);
     mirrorCam.position.y = 2 * waterY - mirrorCam.position.y;
     camera.getWorldDirection(tmpDir);
     tmpTarget.copy(camera.position).add(tmpDir);
     tmpTarget.y = 2 * waterY - tmpTarget.y;
-  // up de la caméra-miroir = up réel de la caméra réfléchi par le plan d'eau
-  // (composante y inversée). Hardcoder (0,-1,0) suppose un up monde (0,1,0) :
-  // faux en vue du dessus où camera.up = (0,0,-1), l'up devenait PARALLÈLE à
-  // l'axe de visée vertical, lookAt dégénérait et le reflet du bateau tournait
-  // autour de lui (fantôme flou orbitant) au lieu de se poser sous la coque.
+    // Reflect the actual camera up vector; a fixed world up degenerates in top view.
     mirrorCam.up.set(camera.up.x, -camera.up.y, camera.up.z);
     mirrorCam.lookAt(tmpTarget);
     mirrorCam.projectionMatrix.copy(camera.projectionMatrix);
@@ -740,10 +675,9 @@ function renderWaterPasses(now, quality) {
   paradiseSky.visible = oldParadiseSkyVisible;
 }
 
-// ---------------- post-processing ----------------
 const bufSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const composerRT = new THREE.WebGLRenderTarget(bufSize.x, bufSize.y, {
-  samples: IS_TOUCH ? 0 : 4, // MSAA coûteux sur GPU mobile ; l'AA du shader océan suffit
+  samples: IS_TOUCH ? 0 : 4,
   type: THREE.HalfFloatType,
 });
 const composer = new EffectComposer(renderer, composerRT);
@@ -849,8 +783,6 @@ qualitySelect?.addEventListener('change', () => {
   else url.searchParams.set('quality', mode);
   history.replaceState(null, '', url);
   syncQualityControl();
-  // Un clic ne doit pas laisser le halo actif ; au clavier, le focus est conservé
-  // pour permettre de continuer à naviguer avec Tab/Flèches.
   if (releasePointerFocus) requestAnimationFrame(() => qualitySelect.blur());
 });
 
@@ -879,10 +811,8 @@ function updatePerformanceHud(now) {
   ].join('\n');
 }
 
-// ---------------- entrées ----------------
 const keys = new Set();
 
-// actions ponctuelles, partagées entre clavier et boutons tactiles
 function resetBoat() {
   throttle = 0;
   wheel = 0;
@@ -922,9 +852,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') resetBoat();
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyB') e.shiftKey ? previousBoat() : nextBoat();
-  // Raccourci global : on NE déplace PAS le focus (restoreFocus=false), sinon le focus
-  // resterait sur le bouton du journal et la touche Espace « stop » le ré-activerait.
-  if (e.code === 'KeyL') achievements.togglePanel(false);   // ouvre/ferme le journal de bord
+  if (e.code === 'KeyL') achievements.togglePanel(false);
   if (e.code === 'Space') throttle = 0;
   const states = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4 };
   if (states[e.code] !== undefined && seaControlsUnlocked()) {
@@ -932,17 +860,11 @@ addEventListener('keydown', (e) => {
   }
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
-// filet de sécurité : ne jamais laisser une commande « bloquée » si le focus
-// part (onglet masqué, appel entrant, geste interrompu…)
 addEventListener('blur', () => { keys.clear(); resetGestureDrive(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { keys.clear(); resetGestureDrive(); }
 });
 
-// ---------------- commandes tactiles à l'écran ----------------
-// Le contact initial devient le neutre. Les deux axes sont continus et peuvent
-// être combinés ; une zone morte évite que le roulis naturel du pouce commande
-// le bateau. Au relâché, updateControls() ramène les deux axes à zéro.
 const gestureDrive = document.getElementById('gesture-drive');
 const driveTutorial = document.getElementById('drive-tutorial');
 const driveVector = gestureDrive?.querySelector('.drive-vector');
@@ -1024,16 +946,13 @@ function updateGestureFromPointer(e) {
 if (gestureDrive) {
   gestureDrive.addEventListener('pointerdown', (e) => {
     if (e.button !== undefined && e.button !== 0) return;
-    // Safari peut exceptionnellement perdre toute la fin d'une séquence
-    // tactile. Un nouveau contact doit alors reprendre la main au lieu d'être
-    // rejeté indéfiniment par l'ancien état fantôme.
     if (gestureState.active) {
       if (e.pointerId === gestureState.id) return;
       resetGestureDrive();
     }
     e.preventDefault();
     audio.start();
-    dismissVoyageIntro();   // le premier contact sur le pad cède le centre au tutoriel de conduite
+    dismissVoyageIntro();
     const showTutorial = beginDriveHintCooldown();
     gestureState.active = true;
     gestureState.id = e.pointerId;
@@ -1059,10 +978,6 @@ if (gestureDrive) {
   gestureDrive.addEventListener('pointercancel', releaseGesture);
   gestureDrive.addEventListener('lostpointercapture', releaseGesture);
 
-  // La capture du pointeur est normalement suffisante, mais certains gestes
-  // interrompus sur iOS ne rendent pas leur pointerup au bouton. Intercepter
-  // aussi la fin au niveau window garantit le retour au neutre avant qu'une
-  // autre couche d'interface puisse consommer l'événement.
   addEventListener('pointerup', releaseGesture, true);
   addEventListener('pointercancel', releaseGesture, true);
   addEventListener('touchend', (e) => {
@@ -1095,10 +1010,6 @@ function setWaveIntensity(level, { userInitiated = false } = {}) {
   });
 }
 
-// Un clic souris laisse le focus sur le bouton. Or Espace (throttle stop) et
-// Entrée ré-actionnent un bouton focalisé : piloter rejouerait alors le bouton
-// sans le vouloir. On rend donc le focus après un clic pointeur (detail > 0),
-// tout en le gardant pour une activation clavier (detail 0) → Tab+Entrée intact.
 function blurAfterPointerClick(e) {
   if (e.detail > 0) e.currentTarget.blur();
 }
@@ -1114,8 +1025,6 @@ document.querySelectorAll('.wave-option').forEach(button => {
 prevBoatButton.addEventListener('click', (e) => { previousBoat(); blurAfterPointerClick(e); });
 nextBoatButton.addEventListener('click', (e) => { nextBoat(); blurAfterPointerClick(e); });
 
-// Sur tactile, la bande elle-même devient une surface de navigation : un geste
-// horizontal franc change de bateau, tandis qu'un tap sur les flèches reste précis.
 let vesselSwipe = null;
 vesselSelector.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || e.target.closest('.vessel-arrow')) return;
@@ -1139,10 +1048,10 @@ syncSeaControlAccess();
 syncVesselSelectorAccess();
 setWaveIntensity(seaControlsUnlocked() ? storedWaveIntensity() : 2);
 
-let throttle = 0; // desktop : levier stable ; tactile : revient au neutre au relâché
-let wheel = 0;    // barre: auto-centrée, +1 = tribord
+let throttle = 0;
+let wheel = 0;
 function updateControls(dt) {
-  if (location.hash === '#auto') { // démo: plein gaz puis virage à 6 s
+  if (location.hash === '#auto') {
     const t = waveField.time;
     throttle = 1;
     wheel = (t > 6 && t < 30) ? 0.9 : 0;
@@ -1178,25 +1087,17 @@ function updateControls(dt) {
   boat.setControls(throttle, wheel);
 }
 
-// ---------------- caméra ----------------
 const CAMERA_MODE_NAMES = ['Chase camera', 'Helm camera', 'Top camera', 'Cinematic camera'];
 const reducedCameraMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-let camMode = storedCamMode(); // 0 = poursuite, 1 = barre, 2 = dessus, 3 = cinématique
+let camMode = storedCamMode();
 achievements.recordCamera(camMode);
-// orbite autour du bateau (relative au cap) : 1 pointeur = glisser pour orbiter,
-// 2 pointeurs = pincer pour zoomer, molette = zoom (desktop).
 let orbitYaw = 0;
 let orbitPitch = 0.3;
 let orbitDist = 12;
-// Zooms indépendants : la caméra libre (poursuite) et la vue du dessus gardent
-// chacune leur propre distance/hauteur ; molette et pince agissent sur le mode actif.
-const ORBIT_MIN = 2.5, ORBIT_MAX = 90; // cadre encore le mégayacht de 78 m sans trop s'éloigner
-// Vue du dessus : plafond assez haut pour cadrer le mégayacht de 78 m. Sa
-// distance par défaut dédiée reste à 150 m afin de ne pas le perdre dans le
-// brouillard de tempête ; 320 m ne sert qu'au dézoom volontaire de l'utilisateur.
+const ORBIT_MIN = 2.5, ORBIT_MAX = 90;
 const TOP_MIN = 12, TOP_MAX = 320;
-let topDist = 60; // hauteur caméra en vue du dessus (recalée par bateau)
-let topYaw = 0;   // orientation de la carte en vue du dessus (0 = nord en haut)
+let topDist = 60;
+let topYaw = 0;
 let cinematicAngle = Math.PI * 1.18;
 let cinematicTime = 0;
 let cameraStatusTimer = null;
@@ -1211,8 +1112,6 @@ function announceCameraMode() {
   cameraStatusTimer = setTimeout(() => status.classList.remove('visible'), 1400);
 }
 
-// Commence l'orbite depuis l'angle actuel de la caméra afin que le passage au
-// mode cinématique soit un travelling continu, pas un changement de plan sec.
 function beginCinematicCamera() {
   const fwd = tmpV.set(0, 0, 1).applyQuaternion(boat.quat);
   const heading = Math.atan2(fwd.x, fwd.z);
@@ -1238,8 +1137,6 @@ function setActiveZoom(v) {
     achievements.recordCameraControl('zoom');
   }
 }
-// Le glissé horizontal oriente la caméra : orbite autour du bateau en poursuite,
-// pivot de la carte (autour de la verticale) en vue du dessus.
 function orbitHoriz(dx) {
   if (camMode === 2) topYaw -= dx * 0.006;
   else orbitYaw -= dx * 0.006;
@@ -1247,13 +1144,10 @@ function orbitHoriz(dx) {
     achievements.recordCameraControl('orbit');
   }
 }
-// On ne suit que les pointeurs nés sur le canvas : le pouce de pilotage reste
-// indépendant. Pendant le pilotage, un deuxième doigt orbite horizontalement
-// et son mouvement vertical règle le zoom ; sans pilotage, orbite + pinch usuels.
-const dragPointers = new Map(); // pointerId -> { x, y }
+const dragPointers = new Map();
 let pinchStartDist = 0, pinchStartZoom = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  audio.start(); // premier contact n'importe où → démarre l'audio
+  audio.start();
   dragPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (dragPointers.size === 2) {
     const [a, b] = [...dragPointers.values()];
@@ -1277,8 +1171,6 @@ addEventListener('pointermove', (e) => {
     setActiveZoom(activeZoom() * Math.exp((e.clientY - prevY) * 0.008));
   } else {
     orbitHoriz(e.clientX - prevX);
-    // en vue du dessus, le vertical n'incline pas une caméra à la verticale ;
-    // seul le glissé horizontal agit (pivot de la carte via orbitHoriz).
     if (camMode !== 2) {
       const previousPitch = orbitPitch;
       orbitPitch = THREE.MathUtils.clamp(
@@ -1291,7 +1183,7 @@ addEventListener('pointermove', (e) => {
 });
 function endDrag(e) {
   dragPointers.delete(e.pointerId);
-  if (dragPointers.size < 2) pinchStartDist = 0; // reprise propre à un seul doigt
+  if (dragPointers.size < 2) pinchStartDist = 0;
 }
 addEventListener('pointerup', endDrag);
 addEventListener('pointercancel', endDrag);
@@ -1309,14 +1201,12 @@ let camInit = false;
 
 function updateCamera(dt) {
   const fwd = tmpV.set(0, 0, 1).applyQuaternion(boat.quat);
-  // la vue du dessus regarde droit vers le bas et redéfinit son « haut » ;
-  // les autres modes ont besoin du haut monde classique pour leur lookAt.
   if (camMode !== 2) camera.up.set(0, 1, 0);
   if (camMode === 0) {
     const speed0 = boat.vel.length();
     const camSpec = boat.spec.camera;
     const heading = Math.atan2(fwd.x, fwd.z);
-    const a = heading + Math.PI + orbitYaw; // 0 = derrière le bateau
+    const a = heading + Math.PI + orbitYaw;
     const dist = orbitDist + speed0 * 0.06;
     const horiz = dist * Math.cos(orbitPitch);
     camDesired.set(
@@ -1329,11 +1219,7 @@ function updateCamera(dt) {
     if (camDesired.y < minY) camDesired.y = minY;
     const k = camInit ? 1 - Math.exp(-dt * (3.2 + speed0 * 0.12)) : 1;
     camera.position.lerp(camDesired, k);
-    // anticipation devant le bateau seulement quand on est derrière lui
     const ahead = 5 * Math.max(Math.cos(orbitYaw), 0);
-    // Sur mobile, on vise légèrement plus bas pour remonter le bateau dans le
-    // viewport et réserver la bande de sélection. Le décalage suit la distance
-    // de poursuite afin de rester visuellement constant d'un bateau à l'autre.
     const mobileFramingDrop = IS_TOUCH ? camSpec.chaseDistance * 0.065 : 0;
     camLook.copy(boat.pos).addScaledVector(fwd, ahead).y += 1.1 - mobileFramingDrop;
     camTarget.lerp(camLook, camInit ? 1 - Math.exp(-dt * 8) : 1);
@@ -1355,12 +1241,8 @@ function updateCamera(dt) {
       camera.updateProjectionMatrix();
     }
   } else if (camMode === 2) {
-    // vue du dessus : caméra verticale dézoomée façon carte, centrée sur le bateau.
-    // Hauteur propre (topDist), indépendante du zoom de la caméra libre et
-    // ajustable à la molette/pince ; recalée par bateau au chargement.
     camDesired.set(boat.pos.x, boat.pos.y + topDist, boat.pos.z);
     camera.position.lerp(camDesired, camInit ? 1 - Math.exp(-dt * 3.5) : 1);
-    // « haut » de l'écran orientable au glissé (topYaw) ; à 0, le nord (−Z) est en haut.
     camera.up.set(Math.sin(topYaw), 0, -Math.cos(topYaw));
     camLook.lerp(boat.pos, camInit ? 1 - Math.exp(-dt * 8) : 1);
     camera.lookAt(camLook);
@@ -1371,9 +1253,6 @@ function updateCamera(dt) {
     if (topDist >= TOP_MAX) achievements.recordAntWorld();
     camInit = true;
   } else {
-    // Travelling automatique sans coupes. L'orbite reste liée au cap du bateau,
-    // tandis que de lentes variations de focale, hauteur et distance évitent un
-    // mouvement mécanique. Les dimensions viennent du spec de chaque bateau.
     cinematicTime += dt;
     const camSpec = boat.spec.camera;
     const heading = Math.atan2(fwd.x, fwd.z);
@@ -1419,7 +1298,6 @@ function updateCamera(dt) {
   }
 }
 
-// ---------------- HUD ----------------
 const elKn = document.getElementById('kn');
 const elThrottle = document.querySelector('#throttle i');
 const elRudder = document.querySelector('#rudder i');
@@ -1431,7 +1309,6 @@ function updateHUD() {
   elRudder.style.marginLeft = `${(0.5 + wheel * 0.5) * 136}px`;
 }
 
-// ---------------- boucle ----------------
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -1449,10 +1326,8 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const frameStart = performance.now();
   performanceManager.beginFrame(frameStart);
-  // Toute réallocation arrive avant le premier rendu de la frame. L'appliquer
-  // après composer.render() effaçait le canvas juste avant sa composition et
-  // produisait un flash noir à chaque ajustement automatique.
   if (pendingQuality) {
+    // Reallocate before rendering; doing it after composition produces a black flash.
     const quality = pendingQuality;
     const force = pendingQualityForce;
     pendingQuality = null;
@@ -1487,7 +1362,6 @@ renderer.setAnimationLoop(() => {
   mantas.update(dt);
   birds.update(dt);
   updateHUD();
-  // ombre portée qui suit le bateau
   sunLight.position.copy(boat.pos).addScaledVector(sun, 80);
   sunLight.target.position.copy(boat.pos);
   performanceManager.beginGpu();

@@ -1,10 +1,5 @@
 import * as THREE from 'three';
 
-// Traînée d'écume persistante: le bateau "peint" dans une texture monde
-// (150 m autour de lui, ping-pong) qui s'estompe avec le temps. L'océan
-// l'échantillonne comme masque d'écume -> longues traînées qui subsistent,
-// y compris en virage (cf. photos aériennes de référence).
-
 function splatTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -20,6 +15,7 @@ function splatTexture() {
 
 const SPLAT_MAX = 56;
 
+// The boat paints a world-space ping-pong texture so foam persists through turns.
 export class FoamTrail {
   constructor() {
     this.worldSize = 150;
@@ -30,7 +26,6 @@ export class FoamTrail {
     this.texel = this.worldSize / res;
     this.center = new THREE.Vector2(0, 0);
 
-    // scène en espace UV [0,1]
     this.scene = new THREE.Scene();
     this.cam = new THREE.OrthographicCamera(0, 1, 1, 0, 0, 10);
     this.cam.position.z = 1;
@@ -58,7 +53,7 @@ export class FoamTrail {
         }
         void main() {
           vec2 uv = vUv + uShift;
-          // diffusion: la traînée peinte étroite s'élargit avec l'âge
+
           float e = 1.6 / 512.0;
           float c = tap(uv);
           float nb = (tap(uv + vec2(e, 0.0)) + tap(uv - vec2(e, 0.0))
@@ -75,7 +70,6 @@ export class FoamTrail {
     quad.renderOrder = 0;
     this.scene.add(quad);
 
-    // pool de tampons additifs
     const tex = splatTexture();
     this.splats = [];
     for (let i = 0; i < SPLAT_MAX; i++) {
@@ -93,7 +87,7 @@ export class FoamTrail {
 
     this._p = new THREE.Vector3();
     this._local = new THREE.Vector3();
-    this._lastStern = null; // tampon par distance (couverture indep. vitesse)
+    this._lastStern = null;
     this._right = new THREE.Vector3();
     this._fwd = new THREE.Vector3();
   }
@@ -111,7 +105,6 @@ export class FoamTrail {
   }
 
   update(renderer, dt, boat) {
-    // recentrage snappé sur la grille de texels (pas de nage)
     const nx = Math.round(boat.pos.x / this.texel) * this.texel;
     const nz = Math.round(boat.pos.z / this.texel) * this.texel;
     this.fadeMat.uniforms.uShift.value.set(
@@ -119,19 +112,12 @@ export class FoamTrail {
       (nz - this.center.y) / this.worldSize);
     this.center.set(nx, nz);
     this.fadeMat.uniforms.uPrev.value = this.rtA.texture;
-    // demi-vie ~5 s puis longue queue (cf. photos)
     this.fadeMat.uniforms.uDecay.value = Math.exp(-dt * 0.14);
     this.fadeMat.uniforms.uSpread.value = Math.min(dt * 0.55, 1);
 
-    // émission: TAMPONNAGE PAR DISTANCE le long du chemin parcouru
-    // (couverture identique à toute vitesse), avec 3 régimes:
-    // lent = mousse centrale; rapide = rails filandreux + centre dense;
-    // frappe de vague = texture projetée devant et sur les côtés.
     let i = 0;
     const speed = boat.speedKn / 1.94384;
     const fx = boat.spec.effects;
-    // au planing la coque sort de l'eau mais produit un MAX d'écume:
-    // on ne coupe qu'en vol complet
     const wet = boat.wet <= 0.02 ? 0 : Math.min(1, 0.5 + boat.wet * 1.5);
     const stern = boat.worldPoint(fx.wakeOrigin, this._p);
     const sx = stern.x, sz = stern.z;
@@ -152,7 +138,6 @@ export class FoamTrail {
         const px = this._lastStern.x + dx * t;
         const pz = this._lastStern.z + dz * t;
         if (planing) {
-          // rails du V + coeur: le vrai sillon strié
           const railWidth = Math.max(0.34, boat.spec.beam * 0.2);
           const trailLength = THREE.MathUtils.clamp(0.9 + speed * 0.13, 1.2, 3.8);
           const off = fx.wakeHalfWidth;
@@ -163,7 +148,6 @@ export class FoamTrail {
           i = this._place(i, px, pz, boat.spec.beam * 0.34,
             trailLength * 0.9, yaw, 0.13 * wet);
         } else {
-          // basse vitesse: mousse étroite alignée sur l'écoulement
           const jitter = boat.spec.beam * 0.14;
           i = this._place(i, px + (Math.random() - 0.5) * jitter,
             pz + (Math.random() - 0.5) * jitter,
@@ -173,8 +157,7 @@ export class FoamTrail {
       }
     }
     if (dist < 30) { this._lastStern.x = sx; this._lastStern.z = sz; }
-    else { this._lastStern = { x: sx, z: sz }; } // reset/téléportation
-    // frappe contre une vague: écume peinte au contact physique réel
+    else { this._lastStern = { x: sx, z: sz }; }
     if (boat.slam > 1.0 && speed > 1.5 && i < SPLAT_MAX - 3) {
       const hit = boat.slamPoint;
       const localSide = this._local.copy(hit).sub(boat.pos).dot(this._right);

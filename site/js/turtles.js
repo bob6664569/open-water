@@ -2,44 +2,29 @@ import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
-// ---------------------------------------------------------------------------
-// Tortues (mer calme / preset 1). Une ou deux tortues planent lentement au-dessus
-// du fond de sable, battant des nageoires (clip « Swim Cycle »), errant en douceur
-// et virant à l'écart du bateau. Rendues sur la COUCHE 1 (réfraction) → visibles
-// à travers l'eau, comme les poissons. Elles restent submergées (jamais en surface
-// dans cette version), au-dessus du sable (-5 m) et sous la surface.
-//
-// Modèle : « Model 50A - Hawksbill Sea Turtle » par DigitalLife3D (CC-BY-NC-4.0),
-// converti en metallic-roughness (turtle.glb) pour le loader vendored.
-// ---------------------------------------------------------------------------
-
+// The rig faces -Z even though its extended flippers make X the longest bound.
 const _v = new THREE.Vector3();
 const rand = (a, b) => a + Math.random() * (b - a);
 const angLerp = (a, t, k) => a + Math.atan2(Math.sin(t - a), Math.cos(t - a)) * k;
 
 const CALM_PRESET = 1;
 const MODEL_URL = './assets/animals/turtle.glb';
-const TARGET_LEN = 1.9;           // longueur cible (m), grande tortue, bien visible à 5 m de fond
-// Orientation fixe (pas d'heuristique bbox) : d'après l'armature, le nez pointe
-// vers -Z (os Head*/Jaw en z<0, Tail en z>0). Les nageoires étendues rendent la
-// bbox plus LARGE que LONGUE (x≈0.40 > z≈0.39), donc « axe le plus long = longueur »
-// se trompait et faisait nager la tortue de côté (vers la gauche). Le groupe oriente
-// son +Z local dans le sens du déplacement → il faut tourner le nez -Z vers +Z = 180°.
-const MODEL_YAW = Math.PI;        // nez (-Z) → +Z (sens de nage)
-const DEPTH = [-4.2, -1.5];       // bande de nage : au-dessus du sable (-5), sous la surface
-const SPAWN = [58, 96];           // rayon d'apparition (loin, arrive en nageant, jamais près du bateau)
+const TARGET_LEN = 1.9;
+const MODEL_YAW = Math.PI;
+const DEPTH = [-4.2, -1.5];
+const SPAWN = [58, 96];
 const DESPAWN = 150;
 const MAX_N = 2;
-const INTERVAL = [12, 30];        // délai [min,max] entre apparitions (s)
-const BOAT_FLEE_R = 9;            // rayon d'esquive autour de la trajectoire du bateau
+const INTERVAL = [12, 30];
+const BOAT_FLEE_R = 9;
 const BOAT_LEAD = 1.0;
 
 function orientTo(group, vx, vy, vz) {
   const sp = Math.hypot(vx, vy, vz);
   if (sp < 1e-4) return;
   group.rotation.set(
-    Math.asin(THREE.MathUtils.clamp(vy / sp, -1, 1)), // tangage
-    Math.atan2(vx, vz),                               // lacet
+    Math.asin(THREE.MathUtils.clamp(vy / sp, -1, 1)),
+    Math.atan2(vx, vz),
     0);
 }
 
@@ -52,7 +37,7 @@ export class Turtles {
     this.time = 0;
 
     this.turtles = [];
-    this.timer = rand(3, INTERVAL[0]);   // première tortue peu après l'entrée en calme
+    this.timer = rand(3, INTERVAL[0]);
 
     this.proto = null;
     this.clip = null;
@@ -72,11 +57,11 @@ export class Turtles {
       this.yaw = MODEL_YAW;
       this.proto.traverse(o => {
         if (!o.isMesh) return;
-        o.frustumCulled = false;    // skinned bbox instable
+        o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.set(1);            // réfraction (vu à travers l'eau)
+        o.layers.set(1);
       });
-    }, (e) => console.warn('[turtles] chargement échoué', e));
+    }, (e) => console.warn('[turtles] load failed', e));
   }
 
   _make() {
@@ -89,7 +74,7 @@ export class Turtles {
     const mixer = new THREE.AnimationMixer(model);
     if (this.clip) {
       const a = mixer.clipAction(this.clip);
-      a.play(); a.time = rand(0, this.clip.duration); a.timeScale = rand(0.5, 0.8); // nage lente
+      a.play(); a.time = rand(0, this.clip.duration); a.timeScale = rand(0.5, 0.8);
     }
     return { g, mixer };
   }
@@ -102,7 +87,6 @@ export class Turtles {
       cam.x + Math.sin(bearing) * R, rand(DEPTH[0], DEPTH[1]), cam.z + Math.cos(bearing) * R);
     g.position.copy(pos);
     this.scene.add(g);
-    // cap vers un point proche du bateau → traverse la zone visible
     const heading = Math.atan2(
       cam.x + rand(-9, 9) - pos.x, cam.z + rand(-9, 9) - pos.z);
     this.turtles.push({
@@ -114,7 +98,6 @@ export class Turtles {
     });
   }
 
-  // Menace du bateau : distance à sa trajectoire anticipée. Renvoie esquive + urgence.
   _boatThreat(px, pz) {
     const b = this.boat;
     if (!b) return null;
@@ -141,7 +124,7 @@ export class Turtles {
     const th = this._boatThreat(f.pos.x, f.pos.z);
     if (th) {
       f.heading = angLerp(f.heading, Math.atan2(th.ax, th.az), Math.min(1, dt * 3.5));
-      speed = 1.4 + th.u * 2.2;    // accélère un peu à l'esquive, sans jamais détaler
+      speed = 1.4 + th.u * 2.2;
     }
     f.pos.x += Math.sin(f.heading) * speed * dt;
     f.pos.z += Math.cos(f.heading) * speed * dt;

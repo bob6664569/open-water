@@ -15,8 +15,6 @@ function bitcoinFlagTexture() {
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#f7931a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  // Tracés exacts de https://upload.wikimedia.org/wikipedia/commons/4/46/Bitcoin.svg
-  // avec palette inversée : disque blanc et glyphe Bitcoin orange.
   const disk = new Path2D(
     'm63.033,39.744c-4.274,17.143-21.637,27.576-38.782,23.301-17.138-4.274-27.571-21.638-23.295-38.78,4.272-17.145,21.635-27.579,38.775-23.305,17.144,4.274,27.576,21.64,23.302,38.784z',
   );
@@ -41,7 +39,6 @@ function bitcoinFlagTexture() {
   return _bitcoinFlagTexture;
 }
 
-// Halo additif radial partagé par tous les feux de navigation.
 let _navHaloTexture = null;
 function navHaloTexture() {
   if (_navHaloTexture) return _navHaloTexture;
@@ -51,8 +48,6 @@ function navHaloTexture() {
   const ctx = canvas.getContext('2d');
   const gradient = ctx.createRadialGradient(
     size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  // Chute douce et progressive: pas de cœur blanc saturé (qui « crame » en
-  // additif), un simple voile lumineux qui se fond vers l'extérieur.
   gradient.addColorStop(0.0, 'rgba(255,255,255,0.55)');
   gradient.addColorStop(0.12, 'rgba(255,255,255,0.34)');
   gradient.addColorStop(0.32, 'rgba(255,255,255,0.13)');
@@ -98,11 +93,10 @@ function componentMatches(component, selection) {
   return true;
 }
 
-// Certains exports Sketchfab fusionnent l'helice et le moteur dans un seul
-// mesh, tout en gardant des ilots de triangles disjoints. On repartitionne ces
-// triangles sans creer de nouvelle forme visuelle: chaque triangle reste unique.
 function extractExistingComponents(mesh, selection, pivotCenter,
                                    suffix = 'existing-component', weldEps = 0) {
+  // Recover movable parts from merged exports by selecting connected components;
+  // optional welding reconnects coincident vertices from face-per-quad models.
   const geometry = mesh && mesh.geometry;
   const index = geometry && geometry.index;
   const position = geometry && geometry.attributes.position;
@@ -129,10 +123,6 @@ function extractExistingComponents(mesh, selection, pivotCenter,
     union(indices[i], indices[i + 1]);
     union(indices[i], indices[i + 2]);
   }
-  // Soudure optionnelle : les exports où chaque face est un quad indépendant
-  // (sommets coïncidents non partagés) donnent un îlot par face, impossible
-  // d'isoler une pièce d'une voisine collée. En unissant les sommets d'une même
-  // position (grille de pas weldEps), la pièce redevient UN composant connexe.
   if (weldEps > 0) {
     const cell = new Map();
     for (let i = 0; i < position.count; i++) {
@@ -176,10 +166,6 @@ function extractExistingComponents(mesh, selection, pivotCenter,
       ? movingIndices : fixedIndices;
     destination.push(indices[i], indices[i + 1], indices[i + 2]);
   }
-  // Aucun triangle sélectionné → rien à animer. En revanche un mesh sélectionné
-  // à 100 % (aucun reliquat fixe) est valide : le reliquat devient une géométrie
-  // vide et tout le mesh tourne (utile quand une source ne contient QUE la pièce
-  // animée, ex. helices jumelles).
   if (!movingIndices.length) return null;
 
   const original = geometry;
@@ -219,14 +205,9 @@ function extractExistingComponents(mesh, selection, pivotCenter,
   return pivot;
 }
 
-// Variante pour les exports fragmentés (SketchUp/Collada) où UNE pièce (un
-// hors-bord entier) est éparpillée sur PLUSIEURS meshes-matériaux. On découpe
-// chaque mesh par une boîte exprimée dans le repère BRUT commun à tous les
-// meshes de l'export (les nœuds sont des frères sans transform), et on renvoie
-// le mesh mobile SANS pivot : l'appelant regroupe les morceaux de plusieurs
-// meshes sous un seul pivot partagé. Un pré-filtre par boîte englobante évite
-// l'union-find sur les meshes hors zone (coque, console…).
 function splitMeshByBox(mesh, box) {
+  // Fragmented exports may spread one motor across several material meshes.
+  // Return the selected geometry without a pivot so callers can group the pieces.
   const geometry = mesh && mesh.geometry;
   const index = geometry && geometry.index;
   const position = geometry && geometry.attributes.position;
@@ -350,11 +331,11 @@ export class VesselAnimationRig {
   constructor(model, spec) {
     this.steerPivots = [];
     this.propellers = [];
-    this.rotators = []; // rotation continue autonome (radar), indépendante des gaz
+    this.rotators = [];
     this.bones = [];
     this.flags = [];
     this.navLights = [];
-    this.navWater = []; // données d'éclairage de l'eau lues par le shader océan
+    this.navWater = [];
     this._navCfg = null;
     this._steer = 0;
     this._time = 0;
@@ -386,12 +367,6 @@ export class VesselAnimationRig {
         });
       }
     }
-    // Certains modèles embarquent une helice EN DOUBLE par arbre (deux disques
-    // empilés, calés à ~36°). Le rig n'anime que la copie selectionnee; l'autre
-    // resterait figee juste à côté. Quand le mesh source ne contient QUE des
-    // helices (pas d'arbre ni de safran), on masque son reliquat non anime =
-    // l'helice fixe en trop. Ne masque que les meshes d'où une helice a bien
-    // ete extraite (sinon on risquerait de cacher une helice non animee).
     for (const name of config.hideExtractedPropRemainders || []) {
       for (const mesh of extractedPropSources) {
         if (mesh.name === name) mesh.visible = false;
@@ -410,9 +385,6 @@ export class VesselAnimationRig {
         ratio: steerConfig.ratio ?? 1,
       });
     }
-    // Antennes/scanners radar : un ilot de triangles du mesh fusionne, isole
-    // comme le safran, mais anime en rotation continue autour de la verticale
-    // (independamment de la barre et des gaz).
     for (const rotConfig of config.rotators || []) {
       const mesh = model.getObjectByName(rotConfig.mesh);
       const pivot = extractExistingComponents(
@@ -487,13 +459,6 @@ export class VesselAnimationRig {
     });
   }
 
-  // Hors-bord d'un export fragmenté : chaque moteur est éparpillé sur plusieurs
-  // meshes-matériaux (capot, embase, hélice). Pour chaque moteur on isole
-  // d'abord l'hélice (petite boîte), puis le reste du moteur (grande boîte, sans
-  // les triangles d'hélice déjà retirés). On regroupe les morceaux du corps sous
-  // un pivot de DIRECTION (vertical) et ceux de l'hélice sous un pivot de ROTATION
-  // enfant du précédent, l'hélice tourne ET suit la barre. Les boîtes sont en
-  // coords brutes, calibrées visuellement sur le modèle.
   _rigRegionMotors(model, config) {
     const exclude = config.exclude || [];
     const sources = [];
@@ -501,13 +466,11 @@ export class VesselAnimationRig {
       if (o.isMesh && o.geometry && !exclude.includes(o.material?.name)) sources.push(o);
     });
     for (const motor of config.motors || []) {
-      // 1. hélice d'abord (retirée des meshes sources avant de découper le corps)
       const propMeshes = [];
       for (const src of sources) {
         const moving = splitMeshByBox(src, motor.prop.box);
         if (moving) propMeshes.push(moving);
       }
-      // 2. corps du moteur (capot + embase + safran), hélice déjà ôtée
       const bodyMeshes = [];
       for (const src of sources) {
         const moving = splitMeshByBox(src, motor.box);
@@ -537,7 +500,7 @@ export class VesselAnimationRig {
         parent.add(propPivot);
         parent.updateMatrixWorld(true);
         for (const m of propMeshes) propPivot.attach(m);
-        steerPivot.attach(propPivot); // l'hélice pivote aussi avec le moteur
+        steerPivot.attach(propPivot);
         this.propellers.push({
           pivot: propPivot,
           axis: motor.prop.axis || 'y',
@@ -548,9 +511,6 @@ export class VesselAnimationRig {
     }
   }
 
-  // Fait pivoter un ou plusieurs meshes existants autour du centre de leurs
-  // limites, dans le repere de leur parent commun. Utile pour les exports OBJ
-  // aplatis qui ont perdu pivots, os et noms semantiques lors du passage GLB.
   _rigNodePivot(model, config, suffix) {
     const names = config.nodes || (config.node ? [config.node] : []);
     const objects = names.map(name => model.getObjectByName(name)).filter(Boolean);
@@ -607,9 +567,6 @@ export class VesselAnimationRig {
       mesh.material = mesh.material.clone();
       mesh.material.side = THREE.DoubleSide;
       mesh.material.shadowSide = THREE.DoubleSide;
-      // Le GLB d'origine porte COLOR_0, donc GLTFLoader active vertexColors.
-      // La grille procédurale n'en a pas : sans désactivation, la texture est
-      // multipliée par l'attribut couleur absent et le pavillon devient noir.
       mesh.material.vertexColors = false;
       if (config.texture === 'bitcoin') {
         mesh.material.map = bitcoinFlagTexture();
@@ -656,10 +613,8 @@ export class VesselAnimationRig {
     });
   }
 
-  // Feux de navigation: on repère les lentilles par nom de matériau, on leur
-  // donne un matériau propre pour piloter l'émissif, et on accroche un halo
-  // additif centré sur chaque lentille (enfant du mesh -> suit la coque).
   _rigNavLights(model, config) {
+    // Emit from cloned lens materials and project the same lights onto wave geometry.
     const lenses = config.lenses || {};
     const texture = navHaloTexture();
     const center = new THREE.Vector3();
@@ -677,8 +632,6 @@ export class VesselAnimationRig {
       if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
       mesh.geometry.boundingBox.getCenter(center);
       mesh.getWorldScale(worldScale);
-      // le modèle est très mis à l'échelle: on convertit la taille du halo
-      // (en mètres) vers l'espace local du mesh.
       const unit = 1 / (worldScale.x || 1);
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
         map: texture,
@@ -694,8 +647,6 @@ export class VesselAnimationRig {
       sprite.visible = false;
       sprite.renderOrder = 6;
       mesh.add(sprite);
-      // entrée d'éclairage de l'eau: le shader océan la lit et illumine sa
-      // vraie surface (ondulée) sous le feu -> plus de "flaque en l'air".
       const water = {
         color: new THREE.Color(hex), x: 0, z: 0, radius: 1, intensity: 0,
       };
@@ -705,8 +656,6 @@ export class VesselAnimationRig {
     if (this.navLights.length) this._navCfg = config;
   }
 
-  // Lue par ocean.update: positions/couleurs/intensités des feux qui éclairent
-  // la surface. Réutilise les mêmes objets (pas d'allocation par frame).
   getWaterLights() {
     return this.navWater;
   }
@@ -721,16 +670,11 @@ export class VesselAnimationRig {
     const period = cfg.period ?? 1.5;
     const on = cfg.onFraction ?? 0.42;
     const phase = (this._time % period) / period;
-    // clignotement: bosse sinusoïdale douce sur la première partie du cycle,
-    // puis extinction franche.
     const pulse = phase < on ? Math.sin((phase / on) * Math.PI) : 0;
     const emissive = lit * pulse
       * (cfg.roughEmissive + (cfg.stormEmissive - cfg.roughEmissive) * storm);
     const halo = lit * storm * pulse * (cfg.haloOpacity ?? 0.95);
-    // taille du halo: quasi stable (léger souffle au clignotement), un peu
-    // plus large à pleine tempête.
     const size = (cfg.haloSize ?? 0.6) * (0.9 + 0.14 * pulse) * (0.78 + 0.22 * storm);
-    // éclairage de l'eau: intensité de la lueur additive posée sur la surface
     const waterRough = cfg.waterRough ?? 0.5;
     const waterStorm = cfg.waterStorm ?? 1.6;
     const waterGlow = lit * pulse
@@ -741,7 +685,6 @@ export class VesselAnimationRig {
       light.sprite.material.opacity = halo;
       light.sprite.visible = halo > 0.003;
       light.sprite.scale.setScalar(light.unit * size);
-      // empreinte au sol du feu (xz monde), lue par le shader océan
       light.sprite.getWorldPosition(this._point);
       light.water.x = this._point.x;
       light.water.z = this._point.z;
@@ -772,13 +715,9 @@ export class VesselAnimationRig {
       propeller.pivot.rotation[propeller.axis] +=
         spinRate * propeller.handedness * dt;
     }
-    // Le radar balaie en continu, meme moteur coupe.
     for (const rotator of this.rotators) {
       rotator.pivot.rotation[rotator.axis] += rotator.rate * dt;
     }
-    // Le vent météo complète le vent relatif du bateau. La hauteur de mer
-    // évolue déjà progressivement, donc le tissu ne saute pas lors d'un
-    // changement de preset.
     const seaHeight = boat.wf?.significantWaveHeight ?? 0.9;
     if (this._navCfg) this._updateNavLights(boat);
     const stormWind = THREE.MathUtils.smoothstep(seaHeight, 0.9, 5.2);
@@ -831,8 +770,6 @@ export class VesselAnimationRig {
     }
   }
 
-  // Positions réelles des moyeux, utiles aux effets hydrodynamiques. Certains
-  // exports contiennent deux meshes pour la même hélice: on dédoublonne ici.
   getPropellerWorldPositions(target = []) {
     target.length = 0;
     for (const propeller of this.propellers) {
