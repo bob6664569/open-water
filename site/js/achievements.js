@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'ocean-boat:achievements:v1';
 const SAVE_INTERVAL = 2000;
 const UNLOCK_SPACING = 8000;
-const STATE_VERSION = 18;
+const STATE_VERSION = 19;
 
 const NM = 1852;
 const MIN_JUMP_SPEED_KN = 5;
@@ -199,18 +199,18 @@ export const ACHIEVEMENTS = Object.freeze([
   },
   {
     id: 'airtime-075', title: 'Weightless', series: 'Air time', tier: 1,
-    description: 'Stay fully airborne for three quarters of a second.',
-    metric: 'bestAirTime', target: 0.75,
+    description: 'Spend a total of ten seconds fully airborne.',
+    metric: 'totalAirTime', target: 10,
   },
   {
     id: 'airtime-15', title: 'Hang Time', series: 'Air time', tier: 2,
-    description: 'Stay fully airborne for one and a half seconds.',
-    metric: 'bestAirTime', target: 1.5,
+    description: 'Accumulate one minute fully airborne.',
+    metric: 'totalAirTime', target: 60,
   },
   {
     id: 'airtime-3', title: 'Flying Hull', series: 'Air time', tier: 3,
-    description: 'Stay fully airborne for three seconds.',
-    metric: 'bestAirTime', target: 3,
+    description: 'Accumulate five minutes fully airborne.',
+    metric: 'totalAirTime', target: 5 * 60,
   },
   {
     id: 'wave-rider', title: 'Wave Rider', reward: 'jetski',
@@ -381,6 +381,7 @@ export class AchievementManager {
       jumpCount: 0,
       bestJumpHeight: 0,
       bestAirTime: 0,
+      totalAirTime: 0,
     };
   }
 
@@ -491,6 +492,12 @@ export class AchievementManager {
         jumpCount: preTierState ? 0 : finitePositive(stored.jumpCount),
         bestJumpHeight: preTierState ? 0 : finitePositive(stored.bestJumpHeight),
         bestAirTime: preTierState ? 0 : finitePositive(stored.bestAirTime),
+        // Older saves only knew the longest flight. Use it as a conservative
+        // starting point so an existing air-time record is not discarded.
+        totalAirTime: preTierState ? 0 : Math.max(
+          finitePositive(stored.totalAirTime),
+          finitePositive(stored.bestAirTime),
+        ),
       };
     } catch {
       return this._emptyState();
@@ -626,7 +633,13 @@ export class AchievementManager {
   }
 
   resetFlight() {
-    this.flight = { airborne: false, airTime: 0, maxHeight: 0, launchSpeedKn: 0 };
+    this.flight = {
+      airborne: false,
+      airTime: 0,
+      creditedAirTime: 0,
+      maxHeight: 0,
+      launchSpeedKn: 0,
+    };
   }
 
   resetCircle() {
@@ -688,6 +701,16 @@ export class AchievementManager {
 
     this.flight.airTime += dt;
     this.flight.maxHeight = Math.max(this.flight.maxHeight, clearance);
+    // Credit every part of a genuine flight once it passes the short anti-jitter
+    // threshold. This keeps cumulative air time independent of jump height and
+    // does not require the boat to land before an achievement can unlock.
+    if (this.flight.airTime >= MIN_AIR_TIME) {
+      const uncreditedAirTime = this.flight.airTime - this.flight.creditedAirTime;
+      this.state.totalAirTime += Math.max(uncreditedAirTime, 0);
+      this.flight.creditedAirTime = this.flight.airTime;
+      this.state.bestAirTime = Math.max(this.state.bestAirTime, this.flight.airTime);
+      this.dirty = true;
+    }
     if (wet < 0.08) return;
 
     const qualifies = this.flight.launchSpeedKn >= MIN_JUMP_SPEED_KN
@@ -696,7 +719,6 @@ export class AchievementManager {
     if (qualifies) {
       this.state.jumpCount += 1;
       this.state.bestJumpHeight = Math.max(this.state.bestJumpHeight, this.flight.maxHeight);
-      this.state.bestAirTime = Math.max(this.state.bestAirTime, this.flight.airTime);
       this.dirty = true;
       this.render();
     }
@@ -875,7 +897,7 @@ export class AchievementManager {
     if (this.distanceRecord) this.distanceRecord.textContent = formatDistance(this.state.distanceMeters);
     if (this.timeRecord) this.timeRecord.textContent = formatDuration(this.state.totalSeconds);
     if (this.jumpRecord) this.jumpRecord.textContent = `${this.state.bestJumpHeight.toFixed(1)} m`;
-    if (this.airRecord) this.airRecord.textContent = `${this.state.bestAirTime.toFixed(2)} s`;
+    if (this.airRecord) this.airRecord.textContent = formatDuration(this.state.totalAirTime);
     if (!this.list) return;
 
     const fragment = document.createDocumentFragment();

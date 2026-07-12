@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   ACHIEVEMENT_ENTRIES,
   ACHIEVEMENTS,
+  AchievementManager,
 } from '../site/js/achievements.js';
 
 function installBrowserStubs(search = '') {
@@ -50,6 +51,95 @@ test('achievement definitions and grouped journal entries stay coherent', () => 
     assert.deepEqual(tiers, [...tiers].sort((a, b) => a - b));
     assert.equal(new Set(tiers).size, tiers.length, `${entry.series} tiers must be unique`);
   }
+});
+
+test('air-time progress accumulates while airborne without waiting for landing', () => {
+  const manager = Object.create(AchievementManager.prototype);
+  manager.state = {
+    bestAirTime: 0,
+    totalAirTime: 0,
+    bestJumpHeight: 0,
+    jumpCount: 0,
+  };
+  manager.dirty = false;
+  manager.render = () => {};
+  manager.resetFlight();
+
+  const boat = {
+    wet: 0,
+    speedKn: 20,
+    pos: { x: 0, y: 1, z: 0 },
+    spec: { rideHeight: 0.1 },
+  };
+  const waveField = { heightAt: () => 0 };
+
+  manager._updateFlight(0.1, boat, waveField);
+  for (let i = 0; i < 8; i++) manager._updateFlight(0.1, boat, waveField);
+
+  assert.equal(manager.flight.airborne, true);
+  assert.ok(manager.state.bestAirTime >= 0.75);
+  assert.ok(manager.state.totalAirTime >= 0.75);
+  assert.equal(manager.state.jumpCount, 0, 'landing still validates completed jumps');
+});
+
+test('short dry contacts do not inflate cumulative air time', () => {
+  const manager = Object.create(AchievementManager.prototype);
+  manager.state = {
+    bestAirTime: 0,
+    totalAirTime: 0,
+    bestJumpHeight: 0,
+    jumpCount: 0,
+  };
+  manager.dirty = false;
+  manager.render = () => {};
+  manager.resetFlight();
+
+  const boat = {
+    wet: 0,
+    speedKn: 20,
+    pos: { x: 0, y: 0.2, z: 0 },
+    spec: { rideHeight: 0.1 },
+  };
+  const waveField = { heightAt: () => 0 };
+
+  manager._updateFlight(0.1, boat, waveField);
+  manager._updateFlight(0.1, boat, waveField);
+  manager._updateFlight(0.1, boat, waveField);
+  boat.wet = 0.2;
+  manager._updateFlight(0.1, boat, waveField);
+
+  assert.equal(manager.state.totalAirTime, 0);
+});
+
+test('air-time achievements use the sum of separate qualifying flights', () => {
+  const manager = Object.create(AchievementManager.prototype);
+  manager.state = {
+    bestAirTime: 0,
+    totalAirTime: 0,
+    bestJumpHeight: 0,
+    jumpCount: 0,
+  };
+  manager.dirty = false;
+  manager.render = () => {};
+  const boat = {
+    wet: 0,
+    speedKn: 20,
+    pos: { x: 0, y: 1, z: 0 },
+    spec: { rideHeight: 0.1 },
+  };
+  const waveField = { heightAt: () => 0 };
+
+  for (let flight = 0; flight < 2; flight++) {
+    manager.resetFlight();
+    manager._updateFlight(0.1, boat, waveField);
+    for (let i = 0; i < 4; i++) manager._updateFlight(0.1, boat, waveField);
+    boat.wet = 0.2;
+    manager._updateFlight(0.1, boat, waveField);
+    boat.wet = 0;
+  }
+
+  assert.ok(manager.state.totalAirTime > manager.state.bestAirTime);
+  assert.ok(manager.state.totalAirTime >= 0.8);
 });
 
 test('manual quality mode is selected, persisted and reported', async () => {
