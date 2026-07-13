@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -60,13 +61,26 @@ Object.defineProperties(globalThis, {
   },
 });
 
-const [{ Ocean }, { BoatEffects }, { WeatherEffects }, { Seabed }, { FoamTrail }] = await Promise.all([
+const [
+  { Ocean, makeWaterNormalTexture },
+  { BoatEffects },
+  { WeatherEffects },
+  { Seabed },
+  { FoamTrail },
+] = await Promise.all([
   import('../site/js/ocean.js'),
   import('../site/js/effects.js'),
   import('../site/js/weather.js'),
   import('../site/js/seabed.js'),
   import('../site/js/foamtrail.js'),
 ]);
+
+test('streamed water-normal generation stays bit-identical', () => {
+  const texture = makeWaterNormalTexture(64);
+  const hash = createHash('sha256').update(texture.image.data).digest('hex');
+  assert.equal(hash, 'ecbe855ea1268bde4299eb4764952d206ae8427b7377c90696a4b66854e38c94');
+  texture.dispose();
+});
 
 test('ocean budgets replace geometry only when segment counts change', () => {
   const waveField = new WaveField();

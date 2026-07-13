@@ -25,7 +25,7 @@ const NOISE_GLSL = /* glsl */`
   }
 `;
 
-function makeWaterNormalTexture(size = 1024) {
+export function makeWaterNormalTexture(size = 1024) {
   const lat = (n, seed) => {
     const g = new Float32Array(n * n);
     let s = seed;
@@ -44,24 +44,34 @@ function makeWaterNormalTexture(size = 1024) {
   };
   const n8 = lat(8, 12345), n16 = lat(16, 67891);
   const n32 = lat(32, 24680), n64 = lat(64, 13579);
-  const h = new Float32Array(size * size);
-  for (let y = 0; y < size; y++) {
+  const fillHeightRow = (y, row) => {
     for (let x = 0; x < size; x++) {
       const u = x / size, v = y / size;
-      h[y * size + x] = 0.45 * n8(u * 8, v * 8)
-                      + 0.28 * n16(u * 16, v * 16)
-                      + 0.17 * n32(u * 32, v * 32)
-                      + 0.1 * n64(u * 64, v * 64);
+      row[x] = 0.45 * n8(u * 8, v * 8)
+             + 0.28 * n16(u * 16, v * 16)
+             + 0.17 * n32(u * 32, v * 32)
+             + 0.1 * n64(u * 64, v * 64);
     }
-  }
+  };
+  // Keep only the neighboring rows needed by the normal kernel. A permanent
+  // copy of row zero closes the vertical seam without retaining the full
+  // size² height field alongside the final RGBA texture.
+  const firstRow = new Float32Array(size);
+  let previousRow = new Float32Array(size);
+  let currentRow = new Float32Array(size);
+  let nextRow = new Float32Array(size);
+  fillHeightRow(0, firstRow);
+  currentRow.set(firstRow);
+  fillHeightRow(size - 1, previousRow);
+  fillHeightRow(size > 1 ? 1 : 0, nextRow);
+
   const data = new Uint8Array(size * size * 4);
   const S = 5.5 * (size / 256);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const xm = (x - 1 + size) % size, xp = (x + 1) % size;
-      const ym = (y - 1 + size) % size, yp = (y + 1) % size;
-      const dx = (h[y * size + xp] - h[y * size + xm]) * S;
-      const dy = (h[yp * size + x] - h[ym * size + x]) * S;
+      const dx = (currentRow[xp] - currentRow[xm]) * S;
+      const dy = (nextRow[x] - previousRow[x]) * S;
       const il = 1 / Math.hypot(dx, dy, 1);
       const i4 = (y * size + x) * 4;
       data[i4] = (-dx * il * 0.5 + 0.5) * 255;
@@ -69,6 +79,13 @@ function makeWaterNormalTexture(size = 1024) {
       data[i4 + 2] = (il * 0.5 + 0.5) * 255;
       data[i4 + 3] = 255;
     }
+    if (y >= size - 1) continue;
+    const recycledRow = previousRow;
+    previousRow = currentRow;
+    currentRow = nextRow;
+    nextRow = recycledRow;
+    if (y + 2 < size) fillHeightRow(y + 2, nextRow);
+    else nextRow.set(firstRow);
   }
   const tex = new THREE.DataTexture(data, size, size);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
