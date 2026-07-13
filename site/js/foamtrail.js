@@ -15,6 +15,28 @@ function splatTexture() {
 
 const SPLAT_MAX = 56;
 
+const SPLAT_VERT = /* glsl */`
+  attribute float aOpacity;
+  varying vec2 vUv;
+  varying float vOpacity;
+  void main() {
+    vUv = uv;
+    vOpacity = aOpacity;
+    vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const SPLAT_FRAG = /* glsl */`
+  uniform sampler2D uMap;
+  varying vec2 vUv;
+  varying float vOpacity;
+  void main() {
+    vec4 texel = texture2D(uMap, vUv);
+    gl_FragColor = vec4(texel.rgb, texel.a * vOpacity);
+  }
+`;
+
 // The boat paints a world-space ping-pong texture so foam persists through turns.
 export class FoamTrail {
   constructor() {
@@ -70,37 +92,55 @@ export class FoamTrail {
     quad.renderOrder = 0;
     this.scene.add(quad);
 
-    const tex = splatTexture();
-    this.splats = [];
-    for (let i = 0; i < SPLAT_MAX; i++) {
-      const m = new THREE.Mesh(
-        new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({
-          map: tex, transparent: true, opacity: 0,
-          blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false,
-        }));
-      m.renderOrder = 1;
-      m.position.z = 0.1;
-      this.scene.add(m);
-      this.splats.push(m);
-    }
+    const splatGeometry = new THREE.PlaneGeometry(1, 1);
+    this._splatOpacity = new Float32Array(SPLAT_MAX);
+    splatGeometry.setAttribute('aOpacity', new THREE.InstancedBufferAttribute(
+      this._splatOpacity, 1,
+    ).setUsage(THREE.DynamicDrawUsage));
+    const splatMaterial = new THREE.ShaderMaterial({
+      uniforms: { uMap: { value: splatTexture() } },
+      vertexShader: SPLAT_VERT,
+      fragmentShader: SPLAT_FRAG,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.splats = new THREE.InstancedMesh(splatGeometry, splatMaterial, SPLAT_MAX);
+    this.splats.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.splats.count = 0;
+    this.splats.frustumCulled = false;
+    this.splats.renderOrder = 1;
+    this.scene.add(this.splats);
 
     this._p = new THREE.Vector3();
     this._local = new THREE.Vector3();
     this._lastStern = null;
     this._right = new THREE.Vector3();
     this._fwd = new THREE.Vector3();
+    this._splatPosition = new THREE.Vector3();
+    this._splatQuaternion = new THREE.Quaternion();
+    this._splatScale = new THREE.Vector3();
+    this._splatMatrix = new THREE.Matrix4();
+    this._splatAxis = new THREE.Vector3(0, 0, 1);
   }
 
   get texture() { return this.rtA.texture; }
 
   _place(i, x, z, widthM, lengthM, yaw, alpha) {
-    const s = this.splats[i];
-    s.position.x = (x - this.center.x) / this.worldSize + 0.5;
-    s.position.y = (z - this.center.y) / this.worldSize + 0.5;
-    s.scale.set(widthM / this.worldSize, lengthM / this.worldSize, 1);
-    s.rotation.z = yaw;
-    s.material.opacity = Math.min(alpha, 0.85);
+    this._splatPosition.set(
+      (x - this.center.x) / this.worldSize + 0.5,
+      (z - this.center.y) / this.worldSize + 0.5,
+      0.1,
+    );
+    this._splatQuaternion.setFromAxisAngle(this._splatAxis, yaw);
+    this._splatScale.set(widthM / this.worldSize, lengthM / this.worldSize, 1);
+    this._splatMatrix.compose(
+      this._splatPosition, this._splatQuaternion, this._splatScale,
+    );
+    this.splats.setMatrixAt(i, this._splatMatrix);
+    this._splatOpacity[i] = Math.min(alpha, 0.85);
     return i + 1;
   }
 
@@ -172,7 +212,11 @@ export class FoamTrail {
         hit.z - this._fwd.z * boat.spec.beam * 0.28,
         boat.spec.beam * 0.4, boat.spec.beam * 0.68, yaw, 0.07);
     }
-    for (; i < SPLAT_MAX; i++) this.splats[i].material.opacity = 0;
+    this.splats.count = i;
+    if (i > 0) {
+      this.splats.instanceMatrix.needsUpdate = true;
+      this.splats.geometry.attributes.aOpacity.needsUpdate = true;
+    }
 
     renderer.setRenderTarget(this.rtB);
     renderer.render(this.scene, this.cam);
