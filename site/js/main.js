@@ -11,14 +11,7 @@ import { BoatEffects } from './effects.js';
 import { BoatAudio } from './audio.js';
 import { FoamTrail } from './foamtrail.js';
 import { WeatherEffects } from './weather.js';
-import { Wildlife } from './wildlife.js';
-import { FishLife } from './fish.js';
-import { Dolphins } from './dolphins.js';
-import { Whales } from './whale.js';
-import { Seabed } from './seabed.js';
-import { Turtles } from './turtles.js';
-import { Mantas } from './manta.js';
-import { Birds } from './birds.js';
+import { createFaunaManager } from './fauna.js';
 import { getVesselSpec } from './vessels.js';
 import { PerformanceManager } from './performance.js';
 import { AchievementManager } from './achievements.js';
@@ -156,17 +149,13 @@ const audio = new BoatAudio(waveField);
 effects.onExhaustPop = (intensity, position) => audio.exhaustPop(intensity, position);
 const foamTrail = new FoamTrail();
 const weather = new WeatherEffects(scene, camera, waveField, audio);
-const wildlife = new Wildlife(scene, camera, waveField, audio);
-const fish = new FishLife(scene, camera, waveField, boat);
-const dolphins = new Dolphins(scene, camera, waveField, boat);
-const whales = new Whales(scene, camera, waveField);
-const seabed = new Seabed(scene, camera, waveField, boat);
-const turtles = new Turtles(scene, camera, waveField, boat);
-const mantas = new Mantas(scene, camera, waveField, boat);
-const birds = new Birds(scene, camera, waveField, audio);
+const fauna = createFaunaManager({ scene, camera, waveField, boat, audio });
 const achievements = new AchievementManager();
-const achievementFauna = { dolphins, whales, turtles, mantas, fish };
-const firstVoyageGuide = new FirstVoyageGuide({ scene, camera, boat, waveField, achievements, fish, wildlife });
+const firstVoyageGuide = new FirstVoyageGuide({
+  scene, camera, boat, waveField, achievements,
+  fish: fauna.fish,
+  wildlife: fauna.wildlife,
+});
 achievements.button?.addEventListener('click', () => {
   document.body.classList.remove('achievement-trial-visible');
 });
@@ -782,7 +771,7 @@ function applyQuality(quality, force = false) {
   ocean.setPerformanceBudget(quality);
   effects.setPerformanceBudget(quality);
   weather.setPerformanceBudget(quality);
-  seabed.setPerformanceBudget(quality);
+  fauna.setPerformanceBudget(quality);
   renderer.getDrawingBufferSize(ocean.uniforms.uResolution.value);
   document.documentElement.dataset.quality = quality.id;
   syncQualityControl();
@@ -1398,7 +1387,7 @@ renderer.setAnimationLoop(() => {
   updateAtmosphere(dt);
   updateControls(dt);
   boat.update(dt);
-  achievements.update(dt, boat, waveField, achievementFauna);
+  achievements.update(dt, boat, waveField, fauna.achievementSources);
   ocean.update(dt, boat.pos.x, boat.pos.z, boat);
   foamTrail.update(renderer, dt, boat);
   ocean.uniforms.uFoamTrail.value = foamTrail.texture;
@@ -1410,14 +1399,7 @@ renderer.setAnimationLoop(() => {
   paradiseSky.position.copy(camera.position);
   audio.update(boat, camera, dt);
   weather.update(dt);
-  wildlife.update(dt);
-  fish.update(dt);
-  dolphins.update(dt);
-  whales.update(dt);
-  seabed.update(dt);
-  turtles.update(dt);
-  mantas.update(dt);
-  birds.update(dt);
+  fauna.update(dt);
   boatHud.update(boat.speedKn, throttle, wheel);
   sunLight.position.copy(boat.pos).addScaledVector(sun, 80);
   sunLight.target.position.copy(boat.pos);

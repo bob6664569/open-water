@@ -300,3 +300,11 @@ test('fauna frame loops avoid temporary threat objects and square-root distance 
     assert.match(source, /sampleBoatThreat\(/, `${name} must use the shared threat sampler`);
   }
 });
+
+test('main delegates fauna construction, budgets and frame updates to one manager', () => {
+  const source = readFileSync(resolve(JS_DIR, 'main.js'), 'utf8');
+  assert.match(source, /createFaunaManager\(/);
+  assert.match(source, /fauna\.setPerformanceBudget\(quality\)/);
+  assert.match(source, /fauna\.update\(dt\)/);
+  assert.doesNotMatch(source, /new (Wildlife|FishLife|Dolphins|Whales|Seabed|Turtles|Mantas|Birds)\(/);
+});
