@@ -5,6 +5,10 @@
 Browser-based 3D powerboat simulation. Vanilla Three.js (vendored, no build
 step), hand-rolled physics.
 
+The welcome screen provides the browser gesture required to unlock Web Audio;
+it does not force fullscreen. Progress, quality preferences, the active camera,
+sea state and selected vessel are stored locally in the browser.
+
 ## Requirements
 
 - Docker and Docker Compose (the app is served as a static nginx container).
@@ -31,13 +35,14 @@ content-hashed, so a deployment cannot leave an old model or script in cache.
 - Q/A and D or arrows: steering (self-centering)
 - Space: throttle to zero
 - C: cycle cameras (chase, helm, top-down, cinematic)
-- 1-4: sea state (`Hs/Tp` shown in the HUD)
+- 1-4: sea state (after the sea controls have been unlocked)
   - 1: `0.35 m / 4.5 s`
   - 2: `0.9 m / 5.4 s`
   - 3: `2.4 m / 6.1 s`
   - 4: `5.2 m / 6.4 s`
 - B / Shift+B: next / previous boat
 - R: reset
+- L: achievement log
 
 ### Touch (mobile / tablet)
 
@@ -48,6 +53,7 @@ center and the keyboard shortcuts are hidden.
 - Drag up / down: forward / reverse; drag left / right: turn. The two axes
   combine and return to neutral on release.
 - When not steering: one finger on the water to orbit, two fingers to pinch-zoom.
+- Double-tap the water: cycle camera.
 - While steering: a second finger on the water orbits horizontally, and its
   vertical motion adjusts zoom.
 - Boat selector: full-width strip at the bottom, left/right arrows and horizontal swipe on mobile. Wave intensity: top right.
@@ -108,8 +114,10 @@ selectable.
 
 A local achievement log tracks progress (speed, distance travelled, jumps,
 dolphin escorts, whale/turtle encounters, etc.). Each unlock shows as a small
-banner, and a panel summarizes the tiers. State persists in `localStorage`: no
-account, no network calls.
+banner, and a panel summarizes explicit tiers plus navigation, play-time, jump
+and cumulative air-time records. Achievements progressively unlock the fleet and
+the sea-state controls; a fresh profile starts with Smolbot only. State persists
+in `localStorage`: no account, no network calls.
 
 ## Technical
 
@@ -118,7 +126,7 @@ account, no network calls.
   secondary cross swell. Shared CPU/GPU computation, smoothed weather
   transitions, noise micro-ripples, procedural crest foam, normal flattening plus
   rising roughness with distance (specular anti-aliasing). PBR material extended
-  via `onBeforeCompile`, lit by a `Sky` passed through PMREM.
+  via `onBeforeCompile`, lit by a prefiltered HDR environment map.
 - **Boat**: 6-DOF rigid body at a fixed step (240 Hz). Each model has its own
   physics sheet (mass, inertias, dimensions, propulsion, cameras, and effect
   anchors). Buoyancy over 8 hull points sampling the real wave (height, normal,
@@ -222,19 +230,14 @@ account, no network calls.
 site/                     Static app served by nginx
   index.html              Entry point (HUD, boot)
   js/                     ES modules, loaded directly (no build step)
-    main.js               App loop, input, cameras, boat loading
-    vessels.js            Per-boat physics / rig / effect specs
-    boat.js               Rigid-body hull + GLB model loading
-    vessel-animations.js  Propellers, flags, steering, nav lights
-    ocean.js waves.js     Sea surface + JONSWAP spectrum
-    weather.js            Weather transitions
-    effects.js foamtrail.js seabed.js   Spray, wakes, lagoon floor
-    fish.js birds.js dolphins.js whale.js manta.js turtles.js wildlife.js
-                          Wildlife systems (per sea state)
-    audio.js              Web Audio sound design
-    achievements.js       Local achievement tracking
-    performance.js        Adaptive quality controller
-    deferred-loader.js    Sequential GLB decoding
+    main.js               Composition root and explicit frame pipeline
+    controllers/          Drive, camera, gesture/view input and vessel workflows
+    simulation/           Boat physics, vessel specs/rigs and wave spectrum
+    rendering/            Ocean, environment, weather, effects and water passes
+    fauna/                Wildlife lifecycle, behavior and shared fauna math
+    runtime/              Audio, deferred loading and adaptive quality
+    ui/                   HUD, first-voyage guide and achievements
+    README.md             JavaScript architecture and dependency conventions
   vendor/                 Vendored Three.js (three.module.js + addons)
   assets/
     boats/                Vessel GLBs + index.json
@@ -259,7 +262,7 @@ npm run check
 python3 -m ruff check tools
 ```
 
-The suite contains more than 40 tests and enforces minimum coverage thresholds
+The suite contains more than 100 automated checks and enforces coverage thresholds
 for the unit-testable physics, configuration, and progression modules. GitHub
 Actions runs JavaScript, HTML, Python, integrity, and coverage checks on every
 push and pull request.
