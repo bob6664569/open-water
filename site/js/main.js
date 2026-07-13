@@ -11,7 +11,6 @@ import { BoatAudio } from './audio.js';
 import { FoamTrail } from './foamtrail.js';
 import { WeatherEffects } from './weather.js';
 import { createFaunaManager } from './fauna.js';
-import { getVesselSpec } from './vessels.js';
 import { PerformanceManager } from './performance.js';
 import { AchievementManager } from './achievements.js';
 import { FirstVoyageGuide } from './first-voyage.js';
@@ -20,6 +19,7 @@ import { DriveController } from './drive-controller.js';
 import { CameraController } from './camera-controller.js';
 import { WaterPassRenderer } from './water-pass-renderer.js';
 import { EnvironmentController } from './environment-controller.js';
+import { VesselController } from './vessel-controller.js';
 
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
@@ -82,48 +82,42 @@ achievements.button?.addEventListener('click', () => {
   document.body.classList.remove('achievement-trial-visible');
 });
 
-let allBoatList = [];
-let boatList = [];
-let boatIdx = 0;
-const REWARD_VESSELS = [
-  { file: /^boat\.glb$/i, reward: 'racer' },
-  { file: /zefiro/i, reward: 'azure' },
-  { file: /motoryacht/i, reward: 'ivory' },
-  { file: /zodiac_boat/i, reward: 'zodiac' },
-  { file: /seadoo-gti/i, reward: 'jetski' },
-  { file: /frickies_yacht/i, reward: 'megayacht' },
-  { file: /assault-boat/i, reward: 'blackfin' },
-  { file: /ss_minnow_iii/i, reward: 'minnow' },
-];
-const LAST_BOAT_KEY = 'ocean-boat:last-vessel';
-const MEGAYACHT_HORN_KEY = 'ocean-boat:megayacht-horn-played';
 const WAVE_INTENSITY_KEY = 'ocean-boat:wave-intensity';
 const initialLoader = document.getElementById('loading');
 const welcome = document.getElementById('welcome');
 const startButton = document.getElementById('start-experience');
 const helpHint = document.getElementById('help');
-const boatLoader = document.getElementById('boat-loading');
-const vesselSelector = document.getElementById('vessel-selector');
-const boatName = document.getElementById('boatname');
-const boatPosition = document.getElementById('boat-position');
-const prevBoatButton = document.getElementById('prev-boat');
-const nextBoatButton = document.getElementById('next-boat');
 const waveControls = document.getElementById('controls');
-const vesselUnlockAlert = document.getElementById('vessel-unlock-alert');
-const vesselUnlockName = document.getElementById('vessel-unlock-name');
-const vesselUnlockHint = document.getElementById('vessel-unlock-hint');
-if (vesselUnlockHint) vesselUnlockHint.textContent = IS_TOUCH ? 'Tap to take the helm' : 'Click to take the helm';
 let initialBoatReady = false;
 let skyReady = false;
 let renderedFrames = 0;
 let appStarted = false;
-
-function availableBoatNames() {
-  return allBoatList.filter(name => {
-    const gate = REWARD_VESSELS.find(entry => entry.file.test(name));
-    return !gate || achievements.isRewardUnlocked(gate.reward);
-  });
-}
+const vessels = new VesselController({
+  boat,
+  achievements,
+  cameraController,
+  audio,
+  isTouch: IS_TOUCH,
+  body: document.body,
+  elements: {
+    loader: document.getElementById('boat-loading'),
+    selector: document.getElementById('vessel-selector'),
+    name: document.getElementById('boatname'),
+    position: document.getElementById('boat-position'),
+    previousButton: document.getElementById('prev-boat'),
+    nextButton: document.getElementById('next-boat'),
+    unlockAlert: document.getElementById('vessel-unlock-alert'),
+    unlockName: document.getElementById('vessel-unlock-name'),
+    unlockHint: document.getElementById('vessel-unlock-hint'),
+  },
+  isAppStarted: () => appStarted,
+  onInitialReady: () => {
+    initialBoatReady = true;
+    finishInitialLoadingWhenReady();
+  },
+  revealDock: delay => revealAfter('dock-revealed', delay),
+});
+vessels.bind();
 
 function seaControlsUnlocked() {
   return achievements.isRewardUnlocked('azure');
@@ -138,73 +132,8 @@ function syncSeaControlAccess() {
   if (!unlocked) document.body.classList.remove('controls-revealed');
 }
 
-function vesselSelectionUnlocked() {
-  return boatList.length >= 2;
-}
-
-function syncVesselSelectorAccess() {
-  const unlocked = vesselSelectionUnlocked();
-  vesselSelector.inert = !unlocked;
-  vesselSelector.setAttribute('aria-hidden', String(!unlocked));
-  if (!unlocked) document.body.classList.remove('dock-revealed');
-}
-
-let vesselAlertShowTimer = null;
-let vesselAlertHideTimer = null;
-let pendingUnlockVessel = null;
-
-function dismissVesselUnlockAlert() {
-  clearTimeout(vesselAlertShowTimer);
-  clearTimeout(vesselAlertHideTimer);
-  vesselAlertShowTimer = null;
-  vesselAlertHideTimer = null;
-  vesselUnlockAlert?.classList.remove('visible');
-  vesselUnlockAlert?.setAttribute('aria-hidden', 'true');
-  vesselSelector.classList.remove('new-vessel');
-  pendingUnlockVessel = null;
-}
-
-function announceNewVessel(fileName, delay = 0) {
-  dismissVesselUnlockAlert();
-  vesselAlertShowTimer = setTimeout(() => {
-    vesselAlertShowTimer = null;
-    if (!vesselUnlockAlert || !vesselUnlockName) return;
-    pendingUnlockVessel = fileName;
-    vesselUnlockName.textContent = getVesselSpec(fileName).label;
-    vesselUnlockAlert.setAttribute('aria-hidden', 'false');
-    vesselUnlockAlert.classList.add('visible');
-    vesselSelector.classList.add('new-vessel');
-    vesselAlertHideTimer = setTimeout(dismissVesselUnlockAlert, 5200);
-  }, delay);
-}
-
-function takeHelmOfUnlockedVessel() {
-  const name = pendingUnlockVessel;
-  if (!name) return;
-  const idx = boatList.indexOf(name);
-  if (idx < 0 || idx === boatIdx) { dismissVesselUnlockAlert(); return; }
-  loadBoatByIndex(idx);
-}
-vesselUnlockAlert?.addEventListener('click', takeHelmOfUnlockedVessel);
-
-function refreshAvailableBoatList() {
-  const currentName = boatList[boatIdx];
-  boatList = availableBoatNames();
-  const currentIndex = currentName ? boatList.indexOf(currentName) : -1;
-  boatIdx = currentIndex >= 0 ? currentIndex : 0;
-  if (boatList.length && currentName) updateVesselSelector(boat.spec);
-  else syncVesselSelectorAccess();
-}
-
 addEventListener('ocean-boat:reward-unlocked', event => {
-  if (REWARD_VESSELS.some(entry => entry.reward === event.detail?.reward)) {
-    const previousBoats = new Set(boatList);
-    const selectorWasUnlocked = vesselSelectionUnlocked();
-    refreshAvailableBoatList();
-    if (appStarted && vesselSelectionUnlocked()) revealAfter('dock-revealed', 900);
-    const unlockedBoat = boatList.find(name => !previousBoats.has(name));
-    if (unlockedBoat) announceNewVessel(unlockedBoat, selectorWasUnlocked ? 250 : 1650);
-  }
+  vessels.handleRewardUnlocked(event.detail?.reward);
   if (event.detail?.reward === 'azure') {
     syncSeaControlAccess();
     if (appStarted) revealAfter('controls-revealed', 900);
@@ -237,14 +166,14 @@ function revealAfter(className, delay) {
 function scheduleControlReveals() {
   revealTimers.forEach(clearTimeout);
   revealTimers.length = 0;
-  if (vesselSelectionUnlocked()) revealAfter('dock-revealed', DOCK_REVEAL_DELAY);
+  if (vessels.selectionUnlocked()) revealAfter('dock-revealed', DOCK_REVEAL_DELAY);
   if (seaControlsUnlocked()) revealAfter('controls-revealed', CONTROLS_REVEAL_DELAY);
 }
 
 function buildHelpHint() {
   if (!helpHint) return;
   const segments = ['W / ↑ throttle', 'S / ↓ reverse', 'A D / ← → rudder', 'Space stop', 'C camera / cinema'];
-  if (vesselSelectionUnlocked()) segments.push('B boat');
+  if (vessels.selectionUnlocked()) segments.push('B boat');
   segments.push('Mouse orbit', 'Wheel zoom');
   if (seaControlsUnlocked()) segments.push('1–4 sea');
   segments.push('R reset', 'L log');
@@ -274,7 +203,7 @@ function launchExperience() {
   welcome?.setAttribute('aria-hidden', 'true');
   if (welcome) welcome.inert = true;
   try { audio.start(); } catch {  }
-  void playMegayachtHornOnce(boat.spec);
+  void vessels.playActiveHornOnce();
   scheduleHelpDismiss();
   scheduleControlReveals();
   playVoyageIntro();
@@ -310,7 +239,7 @@ function dismissVoyageIntro() {
 }
 
 function playVoyageIntro() {
-  if (voyageIntroPlayed || !voyageIntro || vesselSelectionUnlocked()) return;
+  if (voyageIntroPlayed || !voyageIntro || vessels.selectionUnlocked()) return;
   voyageIntroPlayed = true;
   voyageIntroTimers.push(setTimeout(() => {
     voyageIntro.hidden = false;
@@ -319,35 +248,6 @@ function playVoyageIntro() {
     addEventListener('keydown', voyageIntroKeyDismiss, true);
     voyageIntroTimers.push(setTimeout(dismissVoyageIntro, VOYAGE_INTRO_HOLD));
   }, VOYAGE_INTRO_DELAY));
-}
-
-function storedBoatName() {
-  try { return localStorage.getItem(LAST_BOAT_KEY); } catch { return null; }
-}
-
-function rememberBoat(name) {
-  try { localStorage.setItem(LAST_BOAT_KEY, name); } catch {  }
-}
-
-let megayachtHornPending = false;
-
-function megayachtHornPlayed() {
-  try { return localStorage.getItem(MEGAYACHT_HORN_KEY) === '1'; } catch { return false; }
-}
-
-function rememberMegayachtHorn() {
-  try { localStorage.setItem(MEGAYACHT_HORN_KEY, '1'); } catch {  }
-}
-
-async function playMegayachtHornOnce(spec) {
-  if (!appStarted || spec?.id !== 'frickies_yacht'
-    || megayachtHornPending || megayachtHornPlayed()) return;
-  megayachtHornPending = true;
-  try {
-    if (await audio.megayachtHorn()) rememberMegayachtHorn();
-  } finally {
-    megayachtHornPending = false;
-  }
 }
 
 function storedWaveIntensity() {
@@ -363,80 +263,7 @@ function rememberWaveIntensity(level) {
   try { localStorage.setItem(WAVE_INTENSITY_KEY, String(level)); } catch {  }
 }
 
-function updateVesselSelector(spec, direction = 0) {
-  boatName.textContent = spec.label;
-  boatPosition.textContent = `${String(boatIdx + 1).padStart(2, '0')} / ${String(boatList.length).padStart(2, '0')}`;
-  prevBoatButton.disabled = boatList.length < 2;
-  nextBoatButton.disabled = boatList.length < 2;
-  vesselSelector.classList.toggle('single-vessel', boatList.length < 2);
-  syncVesselSelectorAccess();
-  if (!direction) return;
-  const animationClass = direction > 0 ? 'changing-next' : 'changing-prev';
-  vesselSelector.classList.remove('changing-next', 'changing-prev');
-  void vesselSelector.offsetWidth;
-  vesselSelector.classList.add(animationClass);
-}
-
-async function loadBoatByIndex(i, { initial = false, direction = 0 } = {}) {
-  if (!boatList.length) return;
-  if (!initial) dismissVesselUnlockAlert();
-  // Preserve an active voyage when swapping models instead of resetting world position.
-  const navigationState = initial ? null : {
-    position: boat.pos.clone(),
-    orientation: boat.quat.clone(),
-    velocity: boat.vel.clone(),
-    angularVelocity: boat.angVelB.clone(),
-    rideHeight: boat.spec?.rideHeight ?? 0,
-  };
-  boatIdx = ((i % boatList.length) + boatList.length) % boatList.length;
-  const name = boatList[boatIdx];
-  const m = name.match(/_(\d+(?:\.\d+)?)(r)?\.glb$/i);
-  const spec = getVesselSpec(name);
-  boat.setSpec(spec);
-  boat.reset();
-  if (navigationState) {
-    boat.pos.copy(navigationState.position);
-    boat.pos.y += (spec.rideHeight ?? 0) - navigationState.rideHeight;
-    boat.quat.copy(navigationState.orientation);
-    boat.vel.copy(navigationState.velocity);
-    boat.angVelB.copy(navigationState.angularVelocity);
-  }
-  achievements.resetFlight();
-  achievements.resetCircle();
-  if (!initial) boatLoader.classList.add('visible');
-  vesselSelector.setAttribute('aria-busy', 'true');
-  updateVesselSelector(spec, direction);
-  try {
-    await boat.loadModel('./assets/boats/' + encodeURIComponent(name),
-                         m ? parseFloat(m[1]) : spec.length,
-                         !!(m && m[2]) || !!spec.reversed);
-    achievements.recordBoat(spec.id || name);
-    void playMegayachtHornOnce(spec);
-  } finally {
-    rememberBoat(name);
-    if (initial) {
-      initialBoatReady = true;
-      finishInitialLoadingWhenReady();
-    } else {
-      boatLoader.classList.remove('visible');
-    }
-    vesselSelector.setAttribute('aria-busy', 'false');
-  }
-  cameraController.setVessel(spec);
-}
-fetch('./assets/boats/index.json')
-  .then(r => r.json())
-  .then(list => {
-    allBoatList = list.map(e => e.name).filter(n => /\.glb$/i.test(n)).sort();
-    boatList = availableBoatNames();
-    const saved = storedBoatName();
-    const unsafeMobileStartup = IS_TOUCH && /motoryacht|ss_minnow|frickies_yacht/i.test(saved || '');
-    const savedIdx = unsafeMobileStartup ? -1 : boatList.indexOf(saved);
-    const z = boatList.findIndex(n => /zefiro/i.test(n));
-    if (boatList.length) loadBoatByIndex(savedIdx >= 0 ? savedIdx : (z >= 0 ? z : 0), { initial: true });
-    else boat.loadModel('./assets/boat.glb').finally(() => { initialBoatReady = true; finishInitialLoadingWhenReady(); });
-  })
-  .catch(() => boat.loadModel('./assets/boat.glb').finally(() => { initialBoatReady = true; finishInitialLoadingWhenReady(); }));
+void vessels.loadCatalog();
 
 environment.load({
   ocean,
@@ -600,17 +427,6 @@ function resetBoat() {
 function cycleCamera() {
   cameraController.cycle();
 }
-function changeBoat(direction) {
-  if (boatList.length > 1 && !boatLoader.classList.contains('visible')) {
-    loadBoatByIndex(boatIdx + direction, { direction });
-  }
-}
-function nextBoat() {
-  changeBoat(1);
-}
-function previousBoat() {
-  changeBoat(-1);
-}
 
 addEventListener('keydown', (e) => {
   if (!appStarted) return;
@@ -618,7 +434,7 @@ addEventListener('keydown', (e) => {
   drive.press(e.code);
   if (e.code === 'KeyR') resetBoat();
   if (e.code === 'KeyC') cycleCamera();
-  if (e.code === 'KeyB') e.shiftKey ? previousBoat() : nextBoat();
+  if (e.code === 'KeyB') e.shiftKey ? vessels.previous() : vessels.next();
   if (e.code === 'KeyL') achievements.togglePanel(false);
   const states = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4 };
   if (states[e.code] !== undefined && seaControlsUnlocked()) {
@@ -788,30 +604,7 @@ document.querySelectorAll('.wave-option').forEach(button => {
     blurAfterPointerClick(e);
   });
 });
-prevBoatButton.addEventListener('click', (e) => { previousBoat(); blurAfterPointerClick(e); });
-nextBoatButton.addEventListener('click', (e) => { nextBoat(); blurAfterPointerClick(e); });
-
-let vesselSwipe = null;
-vesselSelector.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.target.closest('.vessel-arrow')) return;
-  vesselSwipe = { id: e.pointerId, x: e.clientX, y: e.clientY };
-  try { vesselSelector.setPointerCapture(e.pointerId); } catch {}
-});
-vesselSelector.addEventListener('pointerup', (e) => {
-  if (!vesselSwipe || vesselSwipe.id !== e.pointerId) return;
-  const dx = e.clientX - vesselSwipe.x;
-  const dy = e.clientY - vesselSwipe.y;
-  vesselSwipe = null;
-  if (Math.abs(dx) >= 46 && Math.abs(dx) > Math.abs(dy) * 1.25) {
-    audio.start();
-    changeBoat(dx < 0 ? 1 : -1);
-  }
-});
-const cancelVesselSwipe = () => { vesselSwipe = null; };
-vesselSelector.addEventListener('pointercancel', cancelVesselSwipe);
-vesselSelector.addEventListener('lostpointercapture', cancelVesselSwipe);
 syncSeaControlAccess();
-syncVesselSelectorAccess();
 setWaveIntensity(seaControlsUnlocked() ? storedWaveIntensity() : 2);
 
 const dragPointers = new Map();
