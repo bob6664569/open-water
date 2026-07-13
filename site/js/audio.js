@@ -14,6 +14,14 @@ const ENGINE_BANKS = {
     lowRate: rpm => 0.78 + rpm * 0.56,
     highRate: rpm => 0.70 + rpm * 0.45,
   },
+  racer: {
+    full: './assets/audio/engines/racer-full.wav',
+    loopStart: 8.05,
+    loopEnd: 9.68,
+    loopCrossfade: 0.12,
+    introCrossfade: 0.42,
+    loopRate: rpm => 0.92 + rpm * 0.18,
+  },
   'seadoo-gti': {
     low: './assets/audio/engines/seadoo-low.wav',
     high: './assets/audio/engines/seadoo-high.wav',
@@ -27,6 +35,8 @@ const ENGINE_BANKS = {
     highRate: rpm => 0.75 + rpm * 0.34,
   },
 };
+
+const engineAssets = bank => bank.full ? [bank.full] : [bank.low, bank.high];
 
 const AMBIENT_ASSETS = {
   rainLight: './assets/audio/weather/rain-light.mp3',
@@ -68,7 +78,7 @@ const BIRD_CRIES = {
 };
 
 const ALL_ASSETS = [...new Set([
-  ...Object.values(ENGINE_BANKS).flatMap(bank => [bank.low, bank.high]),
+  ...Object.values(ENGINE_BANKS).flatMap(engineAssets),
   ...Object.values(AMBIENT_ASSETS),
   ...Object.values(THUNDER_BANKS).flat(),
   ...GULL_CRIES,
@@ -78,7 +88,7 @@ const CONSTRAINED_AUDIO = matchMedia('(pointer: coarse)').matches
   || 'ontouchstart' in window
   || (navigator.deviceMemory != null && navigator.deviceMemory <= 4);
 const CORE_ASSETS = [...new Set([
-  ...Object.values(ENGINE_BANKS).flatMap(bank => [bank.low, bank.high]),
+  ...Object.values(ENGINE_BANKS).flatMap(engineAssets),
   ...Object.values(AMBIENT_ASSETS),
 ])];
 
@@ -113,6 +123,7 @@ export class BoatAudio {
     this.lastGull = '';
     this.lastBird = { parrot: '' };
     this.lastSlam = -10;
+    this.lastExhaustPop = -10;
     this.impactProximity = 0.7;
 
     this.assetRequests = null;
@@ -230,6 +241,29 @@ export class BoatAudio {
     this.propSrc.connect(this.propFilter).connect(this.propGain).connect(this.engineFilter);
     this.propSrc.start();
 
+    this.racePulseOsc = ctx.createOscillator();
+    this.racePulseOsc.type = 'sawtooth';
+    this.racePulseFilter = ctx.createBiquadFilter();
+    this.racePulseFilter.type = 'bandpass';
+    this.racePulseFilter.frequency.value = 260;
+    this.racePulseFilter.Q.value = 0.85;
+    this.raceWhineOsc = ctx.createOscillator();
+    this.raceWhineOsc.type = 'triangle';
+    this.raceWhineFilter = ctx.createBiquadFilter();
+    this.raceWhineFilter.type = 'highpass';
+    this.raceWhineFilter.frequency.value = 680;
+    this.raceWhineMix = ctx.createGain();
+    this.raceWhineMix.gain.value = 0.16;
+    this.raceEngineGain = ctx.createGain();
+    this.raceEngineGain.gain.value = 0;
+    this.racePulseOsc.connect(this.racePulseFilter).connect(this.raceEngineGain);
+    this.raceWhineOsc.connect(this.raceWhineFilter)
+      .connect(this.raceWhineMix).connect(this.raceEngineGain);
+    this.raceEngineGain.connect(this.engineFilter);
+    this.racePulseOsc.start();
+    this.raceWhineOsc.start();
+    this.exhaustPopBuffer = noiseBuffer(ctx, 0.24);
+
     this.fallbackSeaSrc = ctx.createBufferSource();
     this.fallbackSeaSrc.buffer = noiseBuffer(ctx);
     this.fallbackSeaSrc.loop = true;
@@ -278,9 +312,107 @@ export class BoatAudio {
     return source;
   }
 
+  _crossfadedTail(buffer, startSeconds, endSeconds, fadeSeconds) {
+    const sampleRate = buffer.sampleRate;
+    const start = Math.max(0, Math.floor(startSeconds * sampleRate));
+    const end = Math.min(buffer.length, Math.floor(endSeconds * sampleRate));
+    const regionLength = Math.max(2, end - start);
+    const fadeLength = Math.min(
+      Math.floor(fadeSeconds * sampleRate),
+      Math.floor(regionLength * 0.25),
+    );
+    const outputLength = regionLength - fadeLength;
+    const output = this.ctx.createBuffer(
+      buffer.numberOfChannels,
+      outputLength,
+      sampleRate,
+    );
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+      const input = buffer.getChannelData(channel);
+      const data = output.getChannelData(channel);
+      data.set(input.subarray(start, start + outputLength));
+      for (let i = 0; i < fadeLength; i++) {
+        const mix = i / Math.max(1, fadeLength - 1);
+        data[i] = input[start + i] * mix
+          + input[end - fadeLength + i] * (1 - mix);
+      }
+    }
+    return output;
+  }
+
+  _startIntroTailBank(bank, now) {
+    const intro = this.ctx.createBufferSource();
+    const introGain = this.ctx.createGain();
+    intro.buffer = bank.buffer;
+    intro.playbackRate.value = 1;
+    introGain.gain.value = 1;
+    intro.connect(introGain).connect(bank.bankGain);
+
+    const tail = this.ctx.createBufferSource();
+    const tailGain = this.ctx.createGain();
+    tail.buffer = bank.tailBuffer;
+    tail.loop = true;
+    tail.playbackRate.value = bank.config.loopRate(this.engineRpm);
+    tailGain.gain.value = 0.0001;
+    tail.connect(tailGain).connect(bank.bankGain);
+
+    const fadeDuration = Math.min(
+      bank.config.introCrossfade,
+      bank.buffer.duration * 0.2,
+    );
+    const transition = now + bank.buffer.duration - fadeDuration;
+    introGain.gain.setValueAtTime(1, transition);
+    introGain.gain.exponentialRampToValueAtTime(0.0001, now + bank.buffer.duration);
+    tailGain.gain.setValueAtTime(0.0001, transition);
+    tailGain.gain.exponentialRampToValueAtTime(1, now + bank.buffer.duration);
+    intro.start(now);
+    tail.start(transition);
+    intro.stop(now + bank.buffer.duration + 0.02);
+    bank.intro = intro;
+    bank.introGain = introGain;
+    bank.tail = tail;
+    bank.tailGain = tailGain;
+  }
+
+  _stopIntroTailBank(bank, now) {
+    for (const gain of [bank.introGain, bank.tailGain]) {
+      if (!gain) continue;
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setTargetAtTime(0.0001, now, 0.035);
+    }
+    for (const source of [bank.intro, bank.tail]) {
+      if (!source) continue;
+      try { source.stop(now + 0.18); } catch { /* source already stopped */ }
+    }
+    bank.intro = bank.introGain = bank.tail = bank.tailGain = null;
+  }
+
   _startSampleLayers() {
     for (const [id, config] of Object.entries(ENGINE_BANKS)) {
       const bankGain = this.ctx.createGain();
+      if (config.full) {
+        const buffer = this.buffers.get(config.full);
+        if (!buffer) continue;
+        bankGain.gain.value = 0;
+        bankGain.connect(this.engineFilter);
+        this.engineBanks.set(id, {
+          config,
+          bankGain,
+          buffer,
+          tailBuffer: this._crossfadedTail(
+            buffer,
+            config.loopStart,
+            config.loopEnd,
+            config.loopCrossfade,
+          ),
+          active: false,
+          intro: null,
+          introGain: null,
+          tail: null,
+          tailGain: null,
+        });
+        continue;
+      }
       const lowGain = this.ctx.createGain();
       const highGain = this.ctx.createGain();
       bankGain.gain.value = 0;
@@ -300,6 +432,56 @@ export class BoatAudio {
     this.wavesCalm = this._loop(AMBIENT_ASSETS.wavesCalm, this.ambientBus);
     this.wavesMedium = this._loop(AMBIENT_ASSETS.wavesMedium, this.ambientBus);
     this.wavesStorm = this._loop(AMBIENT_ASSETS.wavesStorm, this.ambientBus);
+  }
+
+  exhaustPop(intensity = 1, position = null) {
+    if (!this.started || !this.ctx || !this.exhaustPopBuffer) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    if (now - this.lastExhaustPop < 0.045) return;
+    this.lastExhaustPop = now;
+    const energy = clamp01(intensity / 1.6);
+    const panner = ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 4;
+    panner.maxDistance = 110;
+    panner.rolloffFactor = 0.42;
+    if (position) {
+      panner.positionX.value = position.x;
+      panner.positionY.value = position.y;
+      panner.positionZ.value = position.z;
+    }
+    panner.connect(this.engineBus);
+
+    const popGain = ctx.createGain();
+    const peak = 0.16 + energy * 0.3;
+    popGain.gain.setValueAtTime(0.001, now);
+    popGain.gain.exponentialRampToValueAtTime(peak, now + 0.004);
+    popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12 + energy * 0.06);
+    popGain.connect(panner);
+
+    const crack = ctx.createBufferSource();
+    crack.buffer = this.exhaustPopBuffer;
+    crack.playbackRate.value = 0.72 + Math.random() * 0.48;
+    const crackFilter = ctx.createBiquadFilter();
+    crackFilter.type = 'bandpass';
+    crackFilter.frequency.value = 330 + energy * 520;
+    crackFilter.Q.value = 0.72;
+    crack.connect(crackFilter).connect(popGain);
+    crack.start(now, Math.random() * 0.035);
+    crack.stop(now + 0.18);
+
+    const thump = ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.setValueAtTime(105 + energy * 48, now);
+    thump.frequency.exponentialRampToValueAtTime(42, now + 0.11);
+    const thumpGain = ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.24 + energy * 0.34, now);
+    thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.115);
+    thump.connect(thumpGain).connect(panner);
+    thump.start(now);
+    thump.stop(now + 0.12);
   }
 
   slam(intensity) {
@@ -548,6 +730,20 @@ export class BoatAudio {
         ? (profile.sampleGain ?? 0.42) * (idleLevel + load * (1 - idleLevel))
         : 0.0001;
       setSmooth(bank.bankGain.gain, level, now, active ? 0.12 : 0.06);
+      if (bank.buffer) {
+        if (active && !bank.active) this._startIntroTailBank(bank, now);
+        if (!active && bank.active) this._stopIntroTailBank(bank, now);
+        bank.active = active;
+        if (bank.tail) {
+          setSmooth(
+            bank.tail.playbackRate,
+            bank.config.loopRate(this.engineRpm),
+            now,
+            0.12,
+          );
+        }
+        continue;
+      }
       setSmooth(bank.lowGain.gain, Math.sqrt(1 - blend), now, 0.08);
       setSmooth(bank.highGain.gain, Math.sqrt(blend), now, 0.08);
       setSmooth(bank.low.playbackRate, bank.config.lowRate(this.engineRpm), now, 0.07);
@@ -563,6 +759,12 @@ export class BoatAudio {
     const hasBank = this.engineBanks.has(bankId);
     setSmooth(this.fallbackEngineGain.gain,
       hasBank ? 0.0001 : 0.035 + profile.gain * (0.28 + throttle * 0.72), now, 0.12);
+    const racerActive = bankId === 'racer';
+    setSmooth(this.racePulseOsc.frequency, fallbackHz * 1.18, now, 0.045);
+    setSmooth(this.racePulseFilter.frequency, 190 + this.engineRpm * 920, now, 0.055);
+    setSmooth(this.raceWhineOsc.frequency, 520 + this.engineRpm * 1950, now, 0.045);
+    setSmooth(this.raceEngineGain.gain,
+      racerActive ? 0.018 + load * 0.095 : 0.0001, now, racerActive ? 0.08 : 0.04);
 
     boat.worldPoint(boat.spec.effects.prop, this._enginePosition);
     setSmooth(this.enginePanner.positionX, this._enginePosition.x, now, 0.025);

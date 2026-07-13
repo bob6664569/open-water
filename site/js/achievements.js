@@ -33,8 +33,8 @@ export const ACHIEVEMENTS = Object.freeze([
     metric: 'bestSpeedKn', target: 40,
   },
   {
-    id: 'speed-50', title: 'Water Rocket', series: 'Speed', tier: 3,
-    description: 'Break the 50-knot barrier.',
+    id: 'speed-50', title: 'Water Rocket', series: 'Speed', tier: 3, reward: 'racer',
+    description: 'Break the 50-knot barrier. The Redline Phantom is now available.',
     metric: 'bestSpeedKn', target: 50,
   },
   {
@@ -80,7 +80,7 @@ export const ACHIEVEMENTS = Object.freeze([
   {
     id: 'fleet-review-8', title: 'Full Fleet', series: 'Fleet', tier: 3,
     description: 'Take the helm of every vessel in the fleet.',
-    metric: 'boats', target: 8,
+    metric: 'boats', target: 9,
   },
   {
     id: 'directors-cut', title: "Director's Cut",

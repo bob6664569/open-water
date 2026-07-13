@@ -39,6 +39,7 @@ in GLB metadata where the source format supports it.
 | Bundled file(s) | Work and creator | License | Local changes |
 | --- | --- | --- | --- |
 | `site/assets/boat.glb`, `site/assets/boats/zefiro_6.5.glb` | [ZEFIRO](https://sketchfab.com/3d-models/zefiro-5c29921a556346f09684eadfbc51a91d) by angelo raffaele catalano | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Browser-ready GLB; fallback copy included |
+| `site/assets/boats/boat.glb`, `site/assets/boats-mobile/boat.glb` | [Boat](https://sketchfab.com/3d-models/boat-bd6166ae8e294bd4a7d4e46be7f80f5d) by milamila | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Mobile copy has downscaled textures |
 | `site/assets/boats/assault-boat_9.5.glb`, `site/assets/boats-mobile/assault-boat_9.5.glb` | [Assault Boat](https://sketchfab.com/3d-models/assault-boat-0d4fca4f2e014cd7b6aefd4653b1508c) by tnnv | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Mobile copy has downscaled textures |
 | `site/assets/boats/seadoo-gti_3.4.glb`, `site/assets/boats-mobile/seadoo-gti_3.4.glb` | [2012 Sea-Doo GTI SE 130](https://sketchfab.com/3d-models/2012-sea-doo-gti-se-130-d7b3e903d7dc43a694720bd347f4fadf) by BoatUS Foundation | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Mobile copy has downscaled textures |
 | `site/assets/boats/motoryacht_10.7r.glb` | [motoryacht 35](https://sketchfab.com/3d-models/motoryacht-35-0bdd7a0de7254426890bb5745bb7da6d) by angelo raffaele catalano | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Browser-ready GLB |
@@ -70,8 +71,11 @@ in GLB metadata where the source format supports it.
 ## Audio
 
 The bundled recordings and their source links are listed in
-[`site/assets/audio/LICENSES.md`](site/assets/audio/LICENSES.md). They are edited
-derivatives of recordings published under CC0 1.0.
+[`site/assets/audio/LICENSES.md`](site/assets/audio/LICENSES.md). Most are edited
+derivatives of recordings published under CC0 1.0. The complete Redline Phantom
+engine WAV uses a separate SFX Engine project license; its final high-rev section
+is looped at runtime and the recording may not be redistributed as a standalone
+sound-effect file.
 
 ## Other visual material
 

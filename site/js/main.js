@@ -152,6 +152,7 @@ scene.add(ocean.patch);
 const boat = new Boat(waveField, scene, startYawFromSun());
 const effects = new BoatEffects(scene, waveField, boat);
 const audio = new BoatAudio(waveField);
+effects.onExhaustPop = (intensity, position) => audio.exhaustPop(intensity, position);
 const foamTrail = new FoamTrail();
 const weather = new WeatherEffects(scene, camera, waveField, audio);
 const wildlife = new Wildlife(scene, camera, waveField, audio);
@@ -173,6 +174,7 @@ let allBoatList = [];
 let boatList = [];
 let boatIdx = 0;
 const REWARD_VESSELS = [
+  { file: /^boat\.glb$/i, reward: 'racer' },
   { file: /zefiro/i, reward: 'azure' },
   { file: /motoryacht/i, reward: 'ivory' },
   { file: /zodiac_boat/i, reward: 'zodiac' },

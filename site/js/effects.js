@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 
+export function turnSpraySpeedBoost(forwardSpeed) {
+  const highSpeed = THREE.MathUtils.smoothstep(forwardSpeed, 48, 103);
+  return 1 + highSpeed * (1.7 + highSpeed * 1.3);
+}
+
 function makeDropletTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -37,6 +42,33 @@ function makeMistTexture() {
     }
   }
   ctx.putImageData(image, 0, 0);
+  return new THREE.CanvasTexture(c);
+}
+
+function makeSmokeTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 96;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(48, 48, 3, 48, 48, 46);
+  g.addColorStop(0, 'rgba(205,212,216,0.5)');
+  g.addColorStop(0.38, 'rgba(165,177,183,0.25)');
+  g.addColorStop(1, 'rgba(115,128,136,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 96, 96);
+  return new THREE.CanvasTexture(c);
+}
+
+function makeSparkTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 48;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(24, 24, 0, 24, 24, 22);
+  g.addColorStop(0, 'rgba(255,255,225,1)');
+  g.addColorStop(0.18, 'rgba(255,188,62,0.95)');
+  g.addColorStop(0.52, 'rgba(255,66,8,0.5)');
+  g.addColorStop(1, 'rgba(125,8,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 48, 48);
   return new THREE.CanvasTexture(c);
 }
 
@@ -420,6 +452,188 @@ class PropellerWash {
   }
 }
 
+function makeFlameGeometry(seed = 1) {
+  const radialSegments = 12;
+  const rings = [
+    { z: 0, radius: 0.34 },
+    { z: -0.1, radius: 0.72 },
+    { z: -0.24, radius: 1 },
+    { z: -0.43, radius: 0.68 },
+    { z: -0.61, radius: 0.86 },
+    { z: -0.79, radius: 0.4 },
+    { z: -1, radius: 0.035 },
+  ];
+  const positions = [];
+  const indices = [];
+  for (let ringIndex = 0; ringIndex < rings.length; ringIndex++) {
+    const ring = rings[ringIndex];
+    const along = ringIndex / (rings.length - 1);
+    const drift = along * (0.055 + seed * 0.004);
+    const cx = Math.sin(seed * 2.17 + ringIndex * 1.83) * drift;
+    const cy = Math.cos(seed * 1.41 + ringIndex * 2.29) * drift;
+    for (let i = 0; i < radialSegments; i++) {
+      const angle = i / radialSegments * Math.PI * 2;
+      const roughness = 1
+        + Math.sin(angle * 3 + seed * 1.7 + ringIndex * 2.1) * 0.14
+        + Math.sin(angle * 5 - seed * 0.9 + ringIndex * 0.7) * 0.08;
+      positions.push(
+        cx + Math.cos(angle) * ring.radius * roughness,
+        cy + Math.sin(angle) * ring.radius * roughness,
+        ring.z,
+      );
+    }
+  }
+  for (let ring = 0; ring < rings.length - 1; ring++) {
+    for (let i = 0; i < radialSegments; i++) {
+      const next = (i + 1) % radialSegments;
+      const a = ring * radialSegments + i;
+      const b = ring * radialSegments + next;
+      const c = (ring + 1) * radialSegments + i;
+      const d = (ring + 1) * radialSegments + next;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+const FLAME_VERT = /* glsl */`
+  varying float vAlong;
+  varying float vAngle;
+  void main() {
+    vAlong = clamp(-position.z, 0.0, 1.0);
+    vAngle = atan(position.y, position.x);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const FLAME_FRAG = /* glsl */`
+  uniform float uTime;
+  uniform float uOpacity;
+  uniform float uSeed;
+  uniform vec3 uHot;
+  uniform vec3 uCool;
+  varying float vAlong;
+  varying float vAngle;
+
+  float hash21(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  void main() {
+    float fast = sin(vAlong * 43.0 - uTime * 57.0 + vAngle * 3.0 + uSeed * 2.7);
+    float torn = sin(vAlong * 21.0 + uTime * 31.0 - vAngle * 5.0 + uSeed * 4.1);
+    float coarse = sin(vAlong * 9.0 - uTime * 19.0 + vAngle * 2.0 - uSeed);
+    float noise = fast * 0.28 + torn * 0.24 + coarse * 0.18;
+    float grain = hash21(vec2(floor(vAlong * 29.0), floor((vAngle + 3.2) * 8.0) + uSeed));
+    float root = smoothstep(0.0, 0.025, vAlong);
+    float tip = 1.0 - smoothstep(0.7, 1.0, vAlong);
+    float breakup = smoothstep(-0.45, 0.48, noise + (1.0 - vAlong) * 0.22);
+    float alpha = uOpacity * root * tip * (0.28 + breakup * 0.72);
+    if (alpha < 0.055 + grain * mix(0.015, 0.12, vAlong)) discard;
+    float heat = smoothstep(0.08, 0.9, vAlong + noise * 0.09);
+    vec3 color = mix(uHot, uCool, heat);
+    color *= 1.0 + fast * 0.08 + (1.0 - vAlong) * 0.16;
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+class ExhaustFlames {
+  constructor(parent) {
+    this.group = new THREE.Group();
+    this.group.name = 'racer-exhaust-flames';
+    this.group.visible = false;
+    parent.add(this.group);
+
+    const layers = [
+      { hot: 0xffa01c, cool: 0xa80800, opacity: 0.38, radius: 0.36, length: 1.85 },
+      { hot: 0xfff09a, cool: 0xff4b06, opacity: 0.62, radius: 0.23, length: 1.42 },
+      { hot: 0xffffea, cool: 0xffb322, opacity: 0.86, radius: 0.105, length: 0.92 },
+    ];
+    this.ports = Array.from({ length: 2 }, (_, portIndex) => {
+      const port = new THREE.Group();
+      port.name = `racer-exhaust-flame-${portIndex + 1}`;
+      for (let layerIndex = 0; layerIndex < layers.length; layerIndex++) {
+        const layer = layers[layerIndex];
+        const seed = 1 + portIndex * 5.3 + layerIndex * 2.7;
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime: { value: 0 },
+            uOpacity: { value: 0 },
+            uSeed: { value: seed },
+            uHot: { value: new THREE.Color(layer.hot) },
+            uCool: { value: new THREE.Color(layer.cool) },
+          },
+          vertexShader: FLAME_VERT,
+          fragmentShader: FLAME_FRAG,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        });
+        const mesh = new THREE.Mesh(makeFlameGeometry(seed), material);
+        mesh.userData.flame = { ...layer, seed };
+        // Keep exhaust fire out of the planar water pass: its saturated additive
+        // color otherwise becomes a detached orange streak below the hull.
+        port.add(mesh);
+      }
+      this.group.add(port);
+      return port;
+    });
+    this.lights = Array.from({ length: 2 }, (_, index) => {
+      const light = new THREE.PointLight(0xff641c, 0, 2.8, 2.4);
+      light.name = `racer-exhaust-light-${index + 1}`;
+      this.group.add(light);
+      return light;
+    });
+  }
+
+  update(points, strength, time) {
+    const visible = Array.isArray(points) && points.length >= 2 && strength > 0.015;
+    this.group.visible = visible;
+    if (!visible) {
+      for (const light of this.lights) light.intensity = 0;
+      return;
+    }
+    for (let i = 0; i < this.ports.length; i++) {
+      const port = this.ports[i];
+      port.position.fromArray(points[i]);
+      const sideFlicker = 0.68 + Math.random() * 0.34
+        + Math.sin(time * (47 + i * 9) + i * 1.7) * 0.13
+        + Math.sin(time * 19.3 - i * 2.1) * 0.08;
+      for (const mesh of port.children) {
+        const layer = mesh.userData.flame;
+        const energy = Math.max(0.02, strength * sideFlicker);
+        const phase = time * (31 + layer.seed * 1.7) + layer.seed;
+        const radius = layer.radius * (0.7 + energy * 0.62)
+          * (0.9 + Math.sin(phase * 0.73) * 0.1);
+        const length = layer.length * energy
+          * (0.74 + Math.sin(phase) * 0.16 + Math.sin(phase * 1.91) * 0.1);
+        mesh.scale.set(radius, radius * (0.82 + Math.sin(phase * 1.37) * 0.1), length);
+        mesh.rotation.z = Math.sin(phase * 0.61) * 0.22 + Math.sin(phase * 1.73) * 0.08;
+        mesh.material.uniforms.uTime.value = time;
+        mesh.material.uniforms.uOpacity.value = layer.opacity * Math.min(1, energy * 1.18);
+      }
+    }
+    for (let i = 0; i < this.lights.length; i++) {
+      const light = this.lights[i];
+      light.position.set(points[i][0], points[i][1] + 0.02, points[i][2] - 0.28);
+      const independentFlicker = 0.74 + Math.random() * 0.24
+        + Math.sin(time * (39 + i * 8) + i * 2.3) * 0.08;
+      light.intensity = 2.35 * strength * independentFlicker;
+    }
+  }
+
+  clear() {
+    this.group.visible = false;
+    for (const light of this.lights) light.intensity = 0;
+  }
+}
+
 export class BoatEffects {
   constructor(scene, waveField, boat) {
     this.boat = boat;
@@ -432,7 +646,21 @@ export class BoatEffects {
       { gravity: 4.8, drag: 0.95, turbulence: 1.15, rotation: 1.4, fadeIn: 0.07 });
     this.wakeFoam = new ParticleSystem(scene, 900, makeImpactFoamTexture(),
       { gravity: 2.4, drag: 1.25, turbulence: 0.5, rotation: 0.55, fadeIn: 0.05 });
+    this.turnSheet = new ParticleSystem(scene, 2600, makeImpactFoamTexture(),
+      { gravity: 6.4, drag: 0.38, turbulence: 1.45, rotation: 1.1, fadeIn: 0.025 });
+    this.turnMist = new ParticleSystem(scene, 1200, makeMistTexture(),
+      { gravity: 0.65, drag: 0.72, turbulence: 1.35, rotation: 0.34, fadeIn: 0.04 });
+    this.turnSheet.points.renderOrder = 5;
+    this.roosterTail = new ParticleSystem(scene, 3800, makeImpactFoamTexture(),
+      { gravity: 5.2, drag: 0.22, turbulence: 0.9, rotation: 0.38, fadeIn: 0.025 });
+    this.roosterMist = new ParticleSystem(scene, 1400, makeMistTexture(),
+      { gravity: 0.42, drag: 0.52, turbulence: 1.1, rotation: 0.27, fadeIn: 0.045 });
+    this.exhaustSmoke = new ParticleSystem(scene, 500, makeSmokeTexture(),
+      { gravity: -0.18, drag: 1.15, turbulence: 0.55, rotation: 0.14, fadeIn: 0.08 });
+    this.exhaustSparks = new ParticleSystem(scene, 650, makeSparkTexture(),
+      { gravity: 0.75, drag: 0.7, turbulence: 0.32, rotation: 1.8, fadeIn: 0.02 });
     this.propWash = new PropellerWash(scene, waveField);
+    this.exhaustFlames = new ExhaustFlames(boat.group || scene);
     this._bowAcc = 0;
     this._bowMistAcc = 0;
     this._sternAcc = 0;
@@ -442,7 +670,19 @@ export class BoatEffects {
     this._turnFoamAcc = 0;
     this._turnSheetAcc = 0;
     this._turnMistAcc = 0;
+    this._turnBlastAcc = 0;
+    this._turnBlastMistAcc = 0;
+    this._turnPulse = 1;
+    this._turnPulseTarget = 1;
+    this._turnPulseTimer = 0;
+    this._turnPrevOrigin = new THREE.Vector3();
+    this._turnCurrentOrigin = new THREE.Vector3();
+    this._turnOriginValid = false;
     this._propAcc = 0;
+    this._roosterAcc = 0;
+    this._roosterMistAcc = 0;
+    this._exhaustSmokeAcc = 0;
+    this._exhaustSparkAcc = 0;
     this._propPositions = [];
     this._bowContacts = [];
     this._up = new THREE.Vector3();
@@ -455,8 +695,23 @@ export class BoatEffects {
     this._relVel = new THREE.Vector3();
     this._lastSpec = boat.spec.id;
     this.turnEnergy = 0;
+    this.turnViolence = 0;
     this._impactCooldown = 0;
     this._impactQueue = [];
+    this._effectTime = 0;
+    this._lastForwardSpeed = 0;
+    this._exhaustPopTimer = 0;
+    this._exhaustBurstTime = 0;
+    this._exhaustBurstDuration = 0.1;
+    this._exhaustBurstStrength = 0;
+    this._exhaustWorld = new THREE.Vector3();
+    this._roosterPrevOrigin = new THREE.Vector3();
+    this._roosterOriginValid = false;
+    this._roosterPulse = 1;
+    this._roosterPulseTarget = 1;
+    this._roosterPulseTimer = 0;
+    this._roosterSideBias = 0;
+    this.onExhaustPop = null;
   }
 
   setPerformanceBudget({ particleScale = 1 } = {}) {
@@ -464,6 +719,15 @@ export class BoatEffects {
     this.mist.setBudget(particleScale);
     this.impactFoam.setBudget(particleScale);
     this.wakeFoam.setBudget(particleScale);
+    const racerScale = Math.max(0.35, particleScale);
+    const turnScale = this.boat.spec.id === 'boat'
+      ? Math.max(0.45, particleScale) : particleScale;
+    this.turnSheet.setBudget(turnScale);
+    this.turnMist.setBudget(turnScale);
+    this.roosterTail.setBudget(racerScale);
+    this.roosterMist.setBudget(racerScale);
+    this.exhaustSmoke.setBudget(particleScale);
+    this.exhaustSparks.setBudget(particleScale);
     this.propWash.setBudget(particleScale);
   }
 
@@ -480,6 +744,200 @@ export class BoatEffects {
     }
   }
 
+  _updateRacerExhaust(dt, boat, forwardSpeed, exhausts) {
+    if (!Array.isArray(exhausts) || exhausts.length < 2 || dt <= 0) {
+      this.exhaustFlames.clear();
+      this._lastForwardSpeed = forwardSpeed;
+      return;
+    }
+    const throttle = Math.max(boat.throttle, 0);
+    const speedNorm = THREE.MathUtils.clamp(
+      forwardSpeed / Math.max(boat.spec.maxPropSpeed, 1), 0, 1,
+    );
+    const acceleration = THREE.MathUtils.clamp(
+      (forwardSpeed - this._lastForwardSpeed) / Math.max(dt, 1 / 240) / 5.5,
+      0, 1,
+    );
+    this._lastForwardSpeed = forwardSpeed;
+    const load = THREE.MathUtils.clamp(
+      throttle * (0.3 + (1 - speedNorm) * 0.7) + acceleration * 0.7,
+      0, 1,
+    );
+
+    this._exhaustBurstTime = Math.max(0, this._exhaustBurstTime - dt);
+    this._exhaustPopTimer -= dt;
+    if (throttle > 0.32 && load > 0.28 && this._exhaustPopTimer <= 0) {
+      this._exhaustBurstDuration = 0.055 + Math.random() * (0.09 + load * 0.12);
+      this._exhaustBurstTime = this._exhaustBurstDuration;
+      this._exhaustBurstStrength = 0.55 + load * 0.8 + Math.random() * 0.32;
+      this._exhaustPopTimer = (0.075 + Math.random() * 0.3) / (0.7 + load * 0.7);
+      this._p.fromArray(exhausts[0]).lerp(this._v.fromArray(exhausts[1]), 0.5);
+      boat.worldPoint(this._p, this._exhaustWorld);
+      this.onExhaustPop?.(this._exhaustBurstStrength, this._exhaustWorld);
+    }
+    if (throttle <= 0.16) this._exhaustPopTimer = 0;
+
+    const age = 1 - this._exhaustBurstTime / Math.max(this._exhaustBurstDuration, 0.001);
+    const envelope = this._exhaustBurstTime > 0
+      ? Math.max(0.28, Math.sin(Math.min(1, age) * Math.PI) ** 0.42) : 0;
+    this.exhaustFlames.update(
+      exhausts,
+      this._exhaustBurstStrength * envelope,
+      this._effectTime,
+    );
+    const flameEnergy = this._exhaustBurstStrength * envelope;
+    if (flameEnergy > 0.06) {
+      this._exhaustSmokeAcc += dt * (12 + flameEnergy * 58);
+    } else {
+      this._exhaustSmokeAcc = 0;
+    }
+    while (this._exhaustSmokeAcc >= 1 && flameEnergy > 0.06) {
+      this._exhaustSmokeAcc -= 1;
+      const exhaust = exhausts[Math.floor(Math.random() * exhausts.length)];
+      this._p.fromArray(exhaust);
+      boat.worldPoint(this._p, this._exhaustWorld);
+      const backward = 0.6 + Math.random() * 2.3;
+      const sideways = (Math.random() - 0.5) * 0.8;
+      this.exhaustSmoke.spawn(
+        this._exhaustWorld.x - this._f.x * Math.random() * 0.3,
+        this._exhaustWorld.y + (Math.random() - 0.5) * 0.16,
+        this._exhaustWorld.z - this._f.z * Math.random() * 0.3,
+        boat.vel.x * 0.42 - this._f.x * backward + this._r.x * sideways,
+        0.16 + Math.random() * 0.52,
+        boat.vel.z * 0.42 - this._f.z * backward + this._r.z * sideways,
+        0.48 + Math.random() * 0.62,
+        0.32 + Math.random() * 0.58,
+        0.07 + Math.random() * 0.1,
+        1.1 + Math.random() * 1.1,
+      );
+    }
+    if (flameEnergy > 0.18) this._exhaustSparkAcc += dt * (18 + flameEnergy * 85);
+    else this._exhaustSparkAcc = 0;
+    while (this._exhaustSparkAcc >= 1 && flameEnergy > 0.18) {
+      this._exhaustSparkAcc -= 1;
+      const exhaust = exhausts[Math.floor(Math.random() * exhausts.length)];
+      this._p.fromArray(exhaust);
+      boat.worldPoint(this._p, this._exhaustWorld);
+      const backward = 3.5 + Math.random() * 9;
+      const sideways = (Math.random() - 0.5) * 1.8;
+      this.exhaustSparks.spawn(
+        this._exhaustWorld.x - this._f.x * Math.random() * 0.18,
+        this._exhaustWorld.y + (Math.random() - 0.5) * 0.12,
+        this._exhaustWorld.z - this._f.z * Math.random() * 0.18,
+        boat.vel.x * 0.48 - this._f.x * backward + this._r.x * sideways,
+        (Math.random() - 0.35) * 1.5,
+        boat.vel.z * 0.48 - this._f.z * backward + this._r.z * sideways,
+        0.14 + Math.random() * 0.34,
+        0.055 + Math.random() * 0.16,
+        0.48 + Math.random() * 0.44,
+        -0.35,
+      );
+    }
+  }
+
+  _emitRoosterTail(dt, boat, forwardSpeed, config) {
+    if (!config || dt <= 0) {
+      this._roosterAcc = 0;
+      this._roosterMistAcc = 0;
+      this._roosterOriginValid = false;
+      return;
+    }
+    const speedStart = config.speedStart ?? 7;
+    const speedEnergy = THREE.MathUtils.smoothstep(
+      forwardSpeed, speedStart,
+      Math.max(speedStart + 1, config.speedFull ?? boat.spec.maxPropSpeed * 0.82),
+    );
+    const drive = THREE.MathUtils.clamp(
+      0.32 + Math.max(boat.throttle, 0) * 0.68,
+      0, 1,
+    );
+    const wet = THREE.MathUtils.clamp(Math.max(boat.propWet, boat.wet * 1.8), 0.35, 1);
+    const energy = speedEnergy * drive * wet;
+    if (energy < 0.015) {
+      this._roosterAcc = 0;
+      this._roosterMistAcc = 0;
+      this._roosterOriginValid = false;
+      return;
+    }
+
+    this._p.fromArray(config.origin || [0, -boat.spec.restDraft, -boat.spec.length * 0.48]);
+    boat.worldPoint(this._p, this._v);
+    if (!this._roosterOriginValid) {
+      this._roosterPrevOrigin.copy(this._v);
+      this._roosterOriginValid = true;
+    }
+    const waterY = this.wf.heightAt(this._v.x, this._v.z);
+    const rate = config.rate ?? 1;
+    this._roosterPulseTimer -= dt;
+    if (this._roosterPulseTimer <= 0) {
+      this._roosterPulseTarget = 0.55 + Math.random() * 1.15;
+      if (Math.random() < 0.24) this._roosterPulseTarget *= 1.35;
+      this._roosterSideBias = (Math.random() - 0.5) * 0.9;
+      this._roosterPulseTimer = 0.05 + Math.random() * 0.22;
+    }
+    this._roosterPulse += (this._roosterPulseTarget - this._roosterPulse)
+      * (1 - Math.exp(-dt * 12));
+    const pulse = this._roosterPulse;
+    this._roosterAcc += dt * (180 + forwardSpeed * 46) * energy * rate * pulse;
+    while (this._roosterAcc >= 1) {
+      this._roosterAcc -= 1;
+      const core = Math.random() < 0.68;
+      const backward = core
+        ? 7 + Math.random() * (8 + energy * 10)
+        : 4 + Math.random() * (14 + energy * 17);
+      const upward = (3.4 + Math.pow(Math.random(), 0.58) * (7 + energy * 11))
+        * (config.height ?? 1) * (0.82 + pulse * 0.18);
+      const sideways = ((Math.random() - 0.5) * (core ? 3.2 : 11)
+        + this._roosterSideBias * (core ? 1.2 : 3.5)) * (config.spread ?? 1);
+      const across = (Math.random() - 0.5) * boat.spec.beam * (core ? 0.4 : 0.82);
+      const behind = Math.random() * (core ? 0.42 : 0.95);
+      const travel = Math.random();
+      const originX = THREE.MathUtils.lerp(this._roosterPrevOrigin.x, this._v.x, travel);
+      const originY = THREE.MathUtils.lerp(this._roosterPrevOrigin.y, this._v.y, travel);
+      const originZ = THREE.MathUtils.lerp(this._roosterPrevOrigin.z, this._v.z, travel);
+      this.roosterTail.spawn(
+        originX + this._r.x * across - this._f.x * behind,
+        Math.max(waterY, originY) + 0.08 + Math.random() * 0.22,
+        originZ + this._r.z * across - this._f.z * behind,
+        boat.vel.x * 0.07 - this._f.x * backward + this._r.x * sideways,
+        upward,
+        boat.vel.z * 0.07 - this._f.z * backward + this._r.z * sideways,
+        1.35 + Math.random() * (0.95 + energy * 1.15),
+        (core ? 1.1 + Math.random() * 1.7 : 0.55 + Math.random() * 1.45)
+          * (0.9 + energy * 0.78),
+        core ? 0.25 + Math.random() * 0.24 : 0.14 + Math.random() * 0.2,
+        0.88 + Math.random() * 1.3,
+      );
+    }
+
+    this._roosterMistAcc += dt * (95 + forwardSpeed * 5.5) * energy * rate
+      * (0.82 + pulse * 0.28);
+    while (this._roosterMistAcc >= 1) {
+      this._roosterMistAcc -= 1;
+      const across = (Math.random() - 0.5) * boat.spec.beam * 0.74;
+      const backward = 4.5 + Math.random() * (8 + energy * 8);
+      const sideways = ((Math.random() - 0.5) * (4 + energy * 8)
+        + this._roosterSideBias * 2.2) * (config.spread ?? 1);
+      const travel = Math.random();
+      const originX = THREE.MathUtils.lerp(this._roosterPrevOrigin.x, this._v.x, travel);
+      const originY = THREE.MathUtils.lerp(this._roosterPrevOrigin.y, this._v.y, travel);
+      const originZ = THREE.MathUtils.lerp(this._roosterPrevOrigin.z, this._v.z, travel);
+      this.roosterMist.spawn(
+        originX + this._r.x * across - this._f.x * Math.random() * 0.8,
+        Math.max(waterY, originY) + 0.18 + Math.random() * 0.58,
+        originZ + this._r.z * across - this._f.z * Math.random() * 0.8,
+        boat.vel.x * 0.09 - this._f.x * backward + this._r.x * sideways,
+        (2.4 + Math.random() * (4.5 + energy * 5.5)) * (config.height ?? 1),
+        boat.vel.z * 0.09 - this._f.z * backward + this._r.z * sideways,
+        1.05 + Math.random() * 1.5,
+        (0.72 + Math.random() * 1.45) * (0.86 + energy * 0.34),
+        0.045 + Math.random() * 0.075,
+        1.1 + Math.random() * 1.05,
+      );
+    }
+    this._roosterPrevOrigin.copy(this._v);
+  }
+
   update(dt) {
     const b = this.boat;
     if (this._lastSpec !== b.spec.id) {
@@ -487,12 +945,30 @@ export class BoatEffects {
       this.mist.clear();
       this.impactFoam.clear();
       this.wakeFoam.clear();
+      this.turnSheet.clear();
+      this.turnMist.clear();
+      this.roosterTail.clear();
+      this.roosterMist.clear();
+      this.exhaustSmoke.clear();
+      this.exhaustSparks.clear();
       this.propWash.clear();
+      this.exhaustFlames.clear();
       this._impactQueue.length = 0;
       this._bowAcc = this._bowMistAcc = this._sternAcc = 0;
       this._sternMistAcc = this._wakeFoamAcc = this._propAcc = 0;
+      this._roosterAcc = this._roosterMistAcc = 0;
+      this._exhaustSmokeAcc = this._exhaustSparkAcc = 0;
       this._turnSprayAcc = this._turnFoamAcc = 0;
       this._turnSheetAcc = this._turnMistAcc = 0;
+      this._turnBlastAcc = this._turnBlastMistAcc = 0;
+      this._turnPulse = this._turnPulseTarget = 1;
+      this._turnPulseTimer = 0;
+      this._turnOriginValid = false;
+      this._lastForwardSpeed = 0;
+      this._exhaustPopTimer = this._exhaustBurstTime = 0;
+      this._roosterPulse = this._roosterPulseTarget = 1;
+      this._roosterPulseTimer = 0;
+      this._roosterOriginValid = false;
       this._lastSpec = b.spec.id;
     }
     const speed = b.speedKn / 1.94384;
@@ -501,7 +977,14 @@ export class BoatEffects {
     this.mist.update(dt);
     this.impactFoam.update(dt);
     this.wakeFoam.update(dt);
+    this.turnSheet.update(dt, this.wf);
+    this.turnMist.update(dt);
+    this.roosterTail.update(dt, this.wf);
+    this.roosterMist.update(dt);
+    this.exhaustSmoke.update(dt);
+    this.exhaustSparks.update(dt);
     this.propWash.update(dt);
+    this._effectTime += dt;
     this._impactCooldown = Math.max(0, this._impactCooldown - dt);
 
     this._r.set(1, 0, 0).applyQuaternion(b.quat);
@@ -510,6 +993,8 @@ export class BoatEffects {
     this.wf.velocityAt(b.pos.x, b.pos.z, this._waterVel);
     this._relVel.copy(b.vel).sub(this._waterVel);
     const forwardSpeed = Math.max(0, this._relVel.dot(this._f));
+    this._updateRacerExhaust(dt, b, forwardSpeed, fx.exhausts);
+    this._emitRoosterTail(dt, b, forwardSpeed, fx.roosterTail);
 
     // Prefer detected model propeller hubs; use the hydrodynamic anchor as fallback.
     const rigProps = b.visualRig?.getPropellerWorldPositions(this._propPositions);
@@ -622,11 +1107,39 @@ export class BoatEffects {
     const turnEnergy = THREE.MathUtils.clamp(
       turnSpeed * Math.pow(turnAmount, 0.68) * turnWet, 0, 1,
     );
+    const wallSpeed = Math.sqrt(THREE.MathUtils.clamp(
+      (forwardSpeed - 0.8) / 102.2, 0, 1,
+    ));
+    const wallEnergy = Math.pow(wallSpeed, 0.9)
+      * Math.pow(turnAmount, 0.55) * turnWet;
     this.turnEnergy = turnEnergy;
-    if (turnEnergy > 0.025) {
+    if (turnEnergy > 0.025 || wallEnergy > 0.006) {
       const outsideSide = Math.abs(b.angVelB.y) > 0.018
         ? -Math.sign(b.angVelB.y)
         : (Math.sign(b.steer) || 1);
+      const speedBoost = turnSpraySpeedBoost(forwardSpeed);
+      const highSpeed = (speedBoost - 1) / 3;
+      this._turnPulseTimer -= dt;
+      if (this._turnPulseTimer <= 0) {
+        this._turnPulseTarget = 0.68 + Math.random() * 0.78;
+        this._turnPulseTimer = 0.055 + Math.random() * 0.13;
+      }
+      this._turnPulse += (this._turnPulseTarget - this._turnPulse)
+        * (1 - Math.exp(-dt * 14));
+      const pulse = 1 + highSpeed * (this._turnPulse - 1);
+      const turnViolence = turnEnergy * speedBoost * pulse;
+      this.turnViolence = Math.max(turnViolence, wallEnergy);
+
+      this._p.set(
+        outsideSide * b.spec.beam * 0.46,
+        -b.spec.restDraft * 0.18,
+        0,
+      );
+      b.worldPoint(this._p, this._turnCurrentOrigin);
+      if (!this._turnOriginValid) {
+        this._turnPrevOrigin.copy(this._turnCurrentOrigin);
+        this._turnOriginValid = true;
+      }
       const spawnTurnPoint = (out, alongJitter = 1) => {
         this._p.set(
           outsideSide * b.spec.beam * (0.41 + Math.random() * 0.08),
@@ -634,43 +1147,114 @@ export class BoatEffects {
           b.spec.length * (-0.24 + Math.random() * 0.46 * alongJitter),
         );
         b.worldPoint(this._p, out);
+        // Fill the distance travelled since the last frame. At 200 kn the boat
+        // advances ~1.7 m per 60 Hz frame, otherwise spray appears in slices.
+        this._v.copy(out).sub(this._turnCurrentOrigin);
+        out.copy(this._turnPrevOrigin).lerp(
+          this._turnCurrentOrigin, Math.random(),
+        ).add(this._v);
         out.y = this.wf.heightAt(out.x, out.z);
       };
 
-      this._turnSprayAcc += dt * (19 + forwardSpeed * 11) * turnEnergy;
+      // This ballistic sheet exists at every moving speed. Its continuous
+      // speed curve grows from a low chine wash into a 150-200 kn water wall.
+      const blastEnergy = wallEnergy;
+      this._turnBlastAcc += dt * (28 + forwardSpeed * 55)
+        * blastEnergy * pulse;
+      while (this._turnBlastAcc >= 1) {
+        this._turnBlastAcc -= 1;
+        spawnTurnPoint(this._p, 1.2);
+        const fan = Math.pow(Math.random(), 0.72);
+        const outward = outsideSide * (
+          1 + wallSpeed * 7
+          + forwardSpeed * (0.06 + fan * (0.07 + wallSpeed * 0.16))
+          + Math.random() * (1 + wallSpeed * 7)
+        );
+        const carry = 0.77 + wallSpeed * 0.14 + Math.random() * 0.055;
+        this.turnSheet.spawn(
+          this._p.x, this._p.y + 0.06 + Math.random() * 0.18, this._p.z,
+          b.vel.x * carry + this._r.x * outward
+            - this._f.x * Math.random() * 0.7,
+          0.45 + wallSpeed * (2.8 + Math.random() * (4.5 + highSpeed * 8)),
+          b.vel.z * carry + this._r.z * outward
+            - this._f.z * Math.random() * 0.7,
+          0.36 + wallSpeed * 0.18 + Math.random() * (0.22 + wallSpeed * 0.28),
+          (0.3 + Math.random() * 1.4)
+            * (0.75 + wallSpeed + highSpeed * 0.45),
+          0.3 + Math.random() * 0.28,
+          0.55 + Math.random() * 0.6,
+        );
+      }
+
+      this._turnBlastMistAcc += dt * (8 + forwardSpeed * 8.5)
+        * blastEnergy * pulse;
+      while (this._turnBlastMistAcc >= 1) {
+        this._turnBlastMistAcc -= 1;
+        spawnTurnPoint(this._p, 1.1);
+        const outward = outsideSide * (
+          0.8 + wallSpeed * 4
+          + forwardSpeed * (0.035 + Math.random() * 0.055 * wallSpeed)
+        );
+        const carry = 0.78 + wallSpeed * 0.12 + Math.random() * 0.06;
+        this.turnMist.spawn(
+          this._p.x, this._p.y + 0.15 + Math.random() * 0.45, this._p.z,
+          b.vel.x * carry + this._r.x * outward,
+          0.35 + wallSpeed * (2.2 + Math.random() * (2.8 + highSpeed * 3.7)),
+          b.vel.z * carry + this._r.z * outward,
+          0.5 + wallSpeed * 0.3 + Math.random() * 0.65,
+          (0.45 + Math.random() * 1.55) * (0.8 + wallSpeed * 0.7),
+          0.055 + Math.random() * 0.075,
+          1.2 + Math.random() * 0.9,
+        );
+      }
+
+      this._turnSprayAcc += dt * (19 + forwardSpeed * 11) * turnViolence;
       while (this._turnSprayAcc >= 1) {
         this._turnSprayAcc -= 1;
         spawnTurnPoint(this._p);
         const outward = outsideSide * (
-          1.2 + Math.random() * (1.6 + turnEnergy * 5.8) + forwardSpeed * 0.11
+          1.2 + Math.random() * (1.6 + turnEnergy * 5.8)
+          + forwardSpeed * (0.11 + highSpeed * 0.1)
         );
         const backward = 0.08 + Math.random() * (0.32 + turnEnergy * 0.72);
-        const forwardCarry = 0.72 + Math.random() * 0.14;
+        const forwardCarry = THREE.MathUtils.lerp(
+          0.72 + Math.random() * 0.14,
+          0.88 + Math.random() * 0.08,
+          highSpeed,
+        );
         this.droplets.spawn(
           this._p.x, this._p.y + 0.025, this._p.z,
           b.vel.x * forwardCarry
             + this._r.x * outward - this._f.x * backward,
-          0.72 + Math.random() * (1.1 + turnEnergy * 4.1),
+          0.72 + Math.random() * (1.1 + turnEnergy * 4.1)
+            + highSpeed * (2.8 + Math.random() * 5.4),
           b.vel.z * forwardCarry
             + this._r.z * outward - this._f.z * backward,
           0.34 + Math.random() * (0.32 + turnEnergy * 0.34),
-          (0.23 + Math.random() * 0.5) * (0.84 + turnEnergy * 0.68),
+          (0.23 + Math.random() * 0.5)
+            * (0.84 + turnEnergy * 0.68 + highSpeed * 0.55),
           0.4 + Math.random() * 0.38,
           0.42 + turnEnergy * 0.32,
         );
       }
 
-      this._turnFoamAcc += dt * (8 + forwardSpeed * 4.3) * turnEnergy;
+      this._turnFoamAcc += dt * (8 + forwardSpeed * 4.3) * turnEnergy
+        * (1 + highSpeed * 1.8) * pulse;
       while (this._turnFoamAcc >= 1) {
         this._turnFoamAcc -= 1;
         spawnTurnPoint(this._p);
-        const outward = outsideSide * (0.7 + Math.random() * (1.5 + turnEnergy * 3));
+        const outward = outsideSide * (
+          0.7 + Math.random() * (1.5 + turnEnergy * 3)
+          + forwardSpeed * highSpeed * 0.08
+        );
+        const foamCarry = THREE.MathUtils.lerp(0.74, 0.89, highSpeed);
         this.wakeFoam.spawn(
           this._p.x, this._p.y + 0.035, this._p.z,
-          b.vel.x * 0.74 + this._r.x * outward
+          b.vel.x * foamCarry + this._r.x * outward
             - this._f.x * (0.08 + Math.random() * 0.48),
-          0.35 + Math.random() * (0.65 + turnEnergy * 1.25),
-          b.vel.z * 0.74 + this._r.z * outward
+          0.35 + Math.random() * (0.65 + turnEnergy * 1.25)
+            + highSpeed * (1.2 + Math.random() * 2.4),
+          b.vel.z * foamCarry + this._r.z * outward
             - this._f.z * (0.08 + Math.random() * 0.48),
           0.42 + Math.random() * 0.42,
           (0.34 + Math.random() * 0.56) * (0.85 + turnEnergy * 0.48),
@@ -680,19 +1264,22 @@ export class BoatEffects {
       }
 
       this._turnSheetAcc += dt * (3 + forwardSpeed * 1.8)
-        * Math.pow(turnEnergy, 1.08);
+        * Math.pow(turnEnergy, 1.08) * (1 + highSpeed * 2.5) * pulse;
       while (this._turnSheetAcc >= 1) {
         this._turnSheetAcc -= 1;
         spawnTurnPoint(this._p, 0.78);
         const outward = outsideSide * (
-          2.4 + Math.random() * (2.8 + turnEnergy * 7.2) + forwardSpeed * 0.12
+          2.4 + Math.random() * (2.8 + turnEnergy * 7.2)
+          + forwardSpeed * (0.12 + highSpeed * 0.13)
         );
         const backward = 0.12 + Math.random() * (0.38 + turnEnergy * 0.85);
+        const sheetCarry = THREE.MathUtils.lerp(0.8, 0.92, highSpeed);
         this.impactFoam.spawn(
           this._p.x, this._p.y + 0.04, this._p.z,
-          b.vel.x * 0.8 + this._r.x * outward - this._f.x * backward,
-          1.15 + Math.random() * (1.5 + turnEnergy * 4.8),
-          b.vel.z * 0.8 + this._r.z * outward - this._f.z * backward,
+          b.vel.x * sheetCarry + this._r.x * outward - this._f.x * backward,
+          1.15 + Math.random() * (1.5 + turnEnergy * 4.8)
+            + highSpeed * (3.8 + Math.random() * 6.2),
+          b.vel.z * sheetCarry + this._r.z * outward - this._f.z * backward,
           0.48 + Math.random() * (0.38 + turnEnergy * 0.38),
           (0.58 + Math.random() * 0.82) * (0.9 + turnEnergy * 0.72),
           0.18 + Math.random() * 0.2,
@@ -701,25 +1288,33 @@ export class BoatEffects {
       }
 
       this._turnMistAcc += dt * Math.max(0, turnEnergy - 0.2)
-        * (2.7 + forwardSpeed * 0.72);
+        * (2.7 + forwardSpeed * 0.72) * (1 + highSpeed * 2.2) * pulse;
       while (this._turnMistAcc >= 1) {
         this._turnMistAcc -= 1;
         spawnTurnPoint(this._p, 0.75);
-        const outward = outsideSide * (0.8 + turnEnergy * 2.2);
+        const outward = outsideSide * (
+          0.8 + turnEnergy * 2.2 + forwardSpeed * highSpeed * 0.055
+        );
+        const mistCarry = THREE.MathUtils.lerp(0.78, 0.91, highSpeed);
         this.mist.spawn(
           this._p.x, this._p.y + 0.08, this._p.z,
-          b.vel.x * 0.78 + this._r.x * outward - this._f.x * 0.16,
-          0.45 + Math.random() * (0.55 + turnEnergy),
-          b.vel.z * 0.78 + this._r.z * outward - this._f.z * 0.16,
+          b.vel.x * mistCarry + this._r.x * outward - this._f.x * 0.16,
+          0.45 + Math.random() * (0.55 + turnEnergy)
+            + highSpeed * (1.6 + Math.random() * 2.8),
+          b.vel.z * mistCarry + this._r.z * outward - this._f.z * 0.16,
           0.52 + Math.random() * 0.52,
           (0.58 + Math.random() * 0.8) * (0.8 + turnEnergy * 0.45),
           0.035 + Math.random() * 0.04,
           0.9,
         );
       }
+      this._turnPrevOrigin.copy(this._turnCurrentOrigin);
     } else {
       this._turnSprayAcc = this._turnFoamAcc = 0;
       this._turnSheetAcc = this._turnMistAcc = 0;
+      this._turnBlastAcc = this._turnBlastMistAcc = 0;
+      this._turnOriginValid = false;
+      this.turnViolence = 0;
     }
 
     const forwardPower = Math.max(b.throttle, 0) * b.propWet;

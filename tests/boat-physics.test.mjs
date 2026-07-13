@@ -121,4 +121,19 @@ test('every vessel remains finite during deterministic fixed-step simulation', a
     });
   }
 });
+
+test('Redline Phantom settles near 200 knots with its bow raised', () => {
+  const boat = makeBoat();
+  boat.setSpec(VESSEL_SPECS.boat);
+  boat.reset();
+  boat.setPerformanceBudget({ physicsHz: 120, physicsMaxSteps: 5 });
+  boat.setControls(1, 0);
+
+  for (let frame = 0; frame < 1200; frame++) boat.update(1 / 60);
+
+  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(boat.quat);
+  const pitchDeg = THREE.MathUtils.radToDeg(Math.asin(forward.y));
+  assert.ok(boat.speedKn >= 197 && boat.speedKn <= 203, `${boat.speedKn.toFixed(1)} kn`);
+  assert.ok(pitchDeg >= 1 && pitchDeg <= 6.5, `${pitchDeg.toFixed(2)}° bow pitch`);
+});
 }

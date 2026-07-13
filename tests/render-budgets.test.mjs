@@ -63,7 +63,7 @@ Object.defineProperties(globalThis, {
 
 const [
   { Ocean, makeWaterNormalTexture },
-  { BoatEffects },
+  { BoatEffects, turnSpraySpeedBoost },
   { WeatherEffects },
   { Seabed },
   { FoamTrail },
@@ -146,6 +146,12 @@ test('particle budgets scale every pool and its GPU draw range', () => {
     [effects.mist, 100],
     [effects.impactFoam, 300],
     [effects.wakeFoam, 225],
+    [effects.turnSheet, 650],
+    [effects.turnMist, 300],
+    [effects.roosterTail, 1330],
+    [effects.roosterMist, 489],
+    [effects.exhaustSmoke, 125],
+    [effects.exhaustSparks, 162],
     [effects.propWash, 425],
   ];
   for (const [system, limit] of expected) {
@@ -153,6 +159,118 @@ test('particle budgets scale every pool and its GPU draw range', () => {
     assert.equal(system.points.geometry.drawRange.count, limit);
     assert.ok(system.cursor < limit);
   }
+});
+
+test('racer flame bursts and exhaust pops share the same trigger', () => {
+  const scene = new THREE.Scene();
+  const boat = {
+    group: new THREE.Group(),
+    throttle: 1,
+    spec: { id: 'boat', maxPropSpeed: 77.2 },
+    worldPoint: (point, out) => out.copy(point),
+  };
+  scene.add(boat.group);
+  const effects = new BoatEffects(scene, { heightAt: () => 0 }, boat);
+  const exhausts = [[-0.78, 0.96, -6.04], [0.78, 0.96, -6.04]];
+  let pop = null;
+  effects.onExhaustPop = (strength, position) => { pop = { strength, position: position.clone() }; };
+
+  effects._updateRacerExhaust(1 / 60, boat, 4, exhausts);
+
+  assert.ok(pop?.strength > 0.5);
+  assert.deepEqual(pop.position.toArray(), [0, 0.96, -6.04]);
+  assert.equal(effects.exhaustFlames.group.visible, true);
+  assert.equal(effects.exhaustFlames.lights.length, 2);
+  assert.ok(effects.exhaustFlames.lights.every(light => light.intensity > 0));
+  assert.deepEqual(
+    effects.exhaustFlames.lights.map(light => light.position.toArray()),
+    [[-0.78, 0.98, -6.32], [0.78, 0.98, -6.32]],
+  );
+  for (const mesh of effects.exhaustFlames.ports[0].children) {
+    assert.equal(mesh.material.isShaderMaterial, true);
+    assert.ok(mesh.material.uniforms.uOpacity.value > 0);
+    assert.equal(mesh.layers.mask, 1, 'flames must stay out of the layer-1 water pass');
+  }
+});
+
+test('racer rooster tail emits a dense ballistic core and a separate mist cloud', () => {
+  const scene = new THREE.Scene();
+  const waveField = { heightAt: () => 0 };
+  const boat = {
+    throttle: 1,
+    propWet: 1,
+    wet: 1,
+    vel: new THREE.Vector3(),
+    spec: { id: 'boat', beam: 3, restDraft: 0.32, length: 12.8, maxPropSpeed: 77.2 },
+    worldPoint: (point, out) => out.copy(point),
+  };
+  const effects = new BoatEffects(scene, waveField, boat);
+
+  effects._emitRoosterTail(1 / 30, boat, 55, {
+    origin: [0, -0.26, -6.05], speedStart: 10, speedFull: 55,
+    rate: 1.25, height: 1.15, spread: 1.15,
+  });
+
+  assert.ok(effects.roosterTail.activeCount > 50);
+  assert.ok(effects.roosterMist.activeCount > 1);
+});
+
+test('turn spray escalates sharply from normal speed to 150-200 knots', () => {
+  const normal = turnSpraySpeedBoost(25);
+  const at150Kn = turnSpraySpeedBoost(150 / 1.94384);
+  const at200Kn = turnSpraySpeedBoost(200 / 1.94384);
+
+  assert.equal(normal, 1);
+  assert.ok(at150Kn > 2, '150-knot turns need a violent spray multiplier');
+  assert.ok(at200Kn > 3.9, '200-knot turns need the full spray multiplier');
+  assert.ok(at200Kn > at150Kn * 1.5);
+});
+
+test('the lateral water wall exists at low speed and scales violently by 175 knots', () => {
+  const scene = new THREE.Scene();
+  const waveField = {
+    heightAt: () => 0,
+    velocityAt: (_x, _z, out) => out.set(0, 0, 0),
+  };
+  const makeBoat = speed => ({
+    group: new THREE.Group(),
+    pos: new THREE.Vector3(),
+    vel: new THREE.Vector3(0, 0, speed),
+    quat: new THREE.Quaternion(),
+    throttle: 1,
+    propWet: 1,
+    wet: 1,
+    speedKn: speed * 1.94384,
+    steer: 0.9,
+    _effSteer: 0.04,
+    angVelB: new THREE.Vector3(0, 0.08, 0),
+    slam: 0,
+    visualRig: null,
+    spec: {
+      id: 'boat', length: 12.8, beam: 3, restDraft: 0.32,
+      maxPropSpeed: 102.9, maxSteerRad: THREE.MathUtils.degToRad(18),
+      buoyPoints: [],
+      effects: {
+        prop: new THREE.Vector3(0, -0.48, -5.7),
+      },
+    },
+    worldPoint(point, out) { return out.copy(point).add(this.pos); },
+  });
+  const fastBoat = makeBoat(175 / 1.94384);
+  scene.add(fastBoat.group);
+  const fastEffects = new BoatEffects(scene, waveField, fastBoat);
+
+  fastEffects.update(1 / 30);
+
+  assert.ok(fastEffects.turnSheet.activeCount > 30);
+  assert.ok(fastEffects.turnMist.activeCount > 4);
+  assert.ok(fastEffects.turnViolence > 1);
+
+  const slowBoat = makeBoat(5);
+  const slowEffects = new BoatEffects(new THREE.Scene(), waveField, slowBoat);
+  slowEffects.update(1 / 15);
+  assert.ok(slowEffects.turnSheet.activeCount > 0);
+  assert.ok(fastEffects.turnSheet.activeCount > slowEffects.turnSheet.activeCount * 20);
 });
 
 test('particle pools track live slots and coalesce GPU buffer uploads', () => {
@@ -331,6 +449,65 @@ test('vessel rigs skip inactive animation inputs without changing active motion'
   });
   propellerRig.update(0.25, propellerBoat);
   assert.equal(pivot.rotation.z, -3.625);
+});
+
+test('telescoping steering counter-moves its two hydraulic rods', () => {
+  const model = new THREE.Group();
+  const rudder = new THREE.Group();
+  rudder.name = 'rudder';
+  rudder.add(new THREE.Mesh(
+    new THREE.BoxGeometry(1, 3, 2), new THREE.MeshBasicMaterial(),
+  ));
+  model.add(rudder);
+  const makeActuator = (name, outer, inner) => {
+    const start = new THREE.Vector3().fromArray(outer);
+    const end = new THREE.Vector3().fromArray(inner);
+    const direction = new THREE.Vector3().subVectors(end, start);
+    const length = direction.length();
+    const geometry = new THREE.CylinderGeometry(0.25, 0.25, length, 8, 4);
+    geometry.rotateX(Math.PI / 2);
+    geometry.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1), direction.normalize(),
+    ));
+    geometry.translate(
+      (start.x + end.x) * 0.5,
+      (start.y + end.y) * 0.5,
+      (start.z + end.z) * 0.5,
+    );
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+    mesh.name = name;
+    model.add(mesh);
+  };
+  makeActuator('port-actuator', [-4, 0, 0], [-1, 0, 10]);
+  makeActuator('starboard-actuator', [4, 0, 0], [1, 0, 10]);
+
+  const rig = new VesselAnimationRig(model, {
+    rig: {
+      telescopingSteering: {
+        nodes: ['rudder'], pivot: [0, 0, 8], axis: 'y',
+        actuators: [
+          {
+            mesh: 'port-actuator', outer: [-4, 0, 0], inner: [-1, 0, 10],
+            rodBase: 0.7, rodSplit: 0.7,
+          },
+          {
+            mesh: 'starboard-actuator', outer: [4, 0, 0], inner: [1, 0, 10],
+            rodBase: 0.7, rodSplit: 0.7,
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(rig.steeringActuators.length, 2);
+  assert.equal(model.getObjectByName('port-actuator').visible, false);
+
+  rig.update(1, { _effSteer: 0.25, throttle: 0 });
+  const scales = rig.steeringActuators.map(({ rodFrame }) => rodFrame.scale.z);
+  assert.ok(
+    (scales[0] - 1) * (scales[1] - 1) < 0,
+    'one rod should retract while the other extends',
+  );
+  assert.ok(Math.abs(rig.steerPivots[0].pivot.rotation.y) > 0.2);
 });
 
 test('foam trail batches every active splat into one instanced draw', () => {

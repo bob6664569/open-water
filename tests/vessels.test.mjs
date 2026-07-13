@@ -24,6 +24,24 @@ test('unknown model names use the documented Zefiro fallback', () => {
   assert.equal(getVesselSpec(), VESSEL_SPECS.zefiro);
 });
 
+test('Redline Phantom keeps its drag-racing identity and twin propeller rig', () => {
+  const spec = VESSEL_SPECS.boat;
+  const topSpeedKn = spec.maxPropSpeed * 1.94384;
+  assert.ok(topSpeedKn >= 199 && topSpeedKn <= 201);
+  assert.equal(spec.audio.bank, 'racer');
+  assert.equal(spec.effects.exhausts.length, 2);
+  assert.ok(spec.effects.roosterTail.rate >= 1);
+  assert.equal(spec.rig.existingPropellers.length, 2);
+  assert.deepEqual(
+    spec.rig.telescopingSteering.nodes,
+    ['polySurface71', 'polySurface72'],
+  );
+  assert.equal(spec.rig.telescopingSteering.actuators.length, 2);
+  assert.ok(spec.rig.telescopingSteering.pivot[2] < 86);
+  assert.ok(spec.pitchStiff > 0);
+  assert.ok(spec.pitchTargetRad > 0);
+});
+
 test('vessel physics sheets satisfy core numeric invariants', async t => {
   for (const [key, spec] of Object.entries(VESSEL_SPECS)) {
     await t.test(key, () => {

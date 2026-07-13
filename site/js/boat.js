@@ -265,7 +265,7 @@ export class Boat {
       const nsize = new THREE.Box3().setFromObject(model)
         .getSize(new THREE.Vector3());
       const len = Math.max(nsize.x, nsize.z);
-      const wantsWaterMask = len >= 4.5;
+      const wantsWaterMask = len >= 4.5 && !this.spec.waterMask?.disabled;
       this._maskWanted = false;
       this.waterMask.visible = false;
       if (wantsWaterMask) {
@@ -514,7 +514,11 @@ export class Boat {
       F.add(Fl);
       const planing = THREE.MathUtils.smoothstep(vLong, 2, S.maxPropSpeed * 0.72);
       const cp = s[4].copy(S.planingPos);
-      cp.z = THREE.MathUtils.lerp(S.length * 0.04, -S.length * 0.1, planing);
+      cp.z = THREE.MathUtils.lerp(
+        S.length * S.planingCpStart,
+        S.length * S.planingCpEnd,
+        planing,
+      );
       tauW.add(s[2].crossVectors(this.worldPoint(cp, s[3]).sub(this.pos), Fl));
     }
 
@@ -529,6 +533,13 @@ export class Boat {
 
     this._qi.copy(this.quat).invert();
     tauB.add(tauW.applyQuaternion(this._qi));
+    if (S.pitchStiff > 0) {
+      const pitch = Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1));
+      const pitchTarget = S.pitchTargetRad * THREE.MathUtils.smoothstep(
+        Math.max(vLong, 0), 2, Math.max(4, S.maxPropSpeed * 0.35),
+      );
+      tauB.x += (pitch - pitchTarget) * S.pitchStiff;
+    }
     const iOmega = s[4].set(
       S.inertia.x * this.angVelB.x,
       S.inertia.y * this.angVelB.y,

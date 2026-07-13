@@ -67,8 +67,12 @@ function makeSpec(config) {
     planingLift,
     planingLiftMax,
     planingPos: v3(0, 0, -length * 0.08),
+    planingCpStart: config.planingCp?.[0] ?? 0.04,
+    planingCpEnd: config.planingCp?.[1] ?? -0.1,
     yawDamp: config.yawDamp,
     pitchRollDamp: config.pitchRollDamp,
+    pitchStiff: config.pitchStiff ?? 0,
+    pitchTargetRad: THREE.MathUtils.degToRad(config.pitchTargetDeg ?? 0),
     bankGain,
     bankMax,
     rollStiff,
@@ -76,6 +80,7 @@ function makeSpec(config) {
       wakeOrigin: v3(0, 0, -length * 0.48),
       prop: v3(0, -restDraft * 0.75, -length * 0.49),
       wakeHalfWidth: beam * 0.34,
+      ...config.effects,
     },
     camera: {
       helm: v3(...camera.helm),
@@ -108,6 +113,76 @@ const NAV_LIGHT_RULES = {
 };
 
 export const VESSEL_SPECS = {
+  boat: makeSpec({
+    id: 'boat', label: 'Redline Phantom',
+    length: 12.8, beam: 3.0, height: 2.0,
+    reversed: true,
+    mass: 4300, restDraft: 0.32, visualDraft: 0.62, rideHeight: 0.14,
+    trim: 0.9,
+    propPos: [0, -0.48, -5.7],
+    maxThrustFwd: 120000, maxThrustRev: 18000, maxSpeed: 102.9,
+    maxSteerDeg: 18, dragLong: [140, 10.6], dragLat: [1450, 330],
+    rudderLift: 245, planingLift: 42, planingLiftMax: 0.66,
+    planingCp: [0.055, 0.005],
+    yawDamp: [9800, 760, 18400], pitchRollDamp: [220000, 9800],
+    pitchStiff: 500000, pitchTargetDeg: 6.5,
+    rollStiff: 17200, bankGain: 380, bankMax: 5400, wavePush: 0.08,
+    camera: { helm: [0, 1.55, -0.25], chaseDistance: 18, chaseHeight: 1.35, helmFov: 61 },
+    audio: {
+      bank: 'racer', idleHz: 62, maxHz: 320,
+      filterBase: 520, filterRange: 2850, gain: 0.32,
+      sampleGain: 0.56, rpmRise: 4.8, rpmFall: 2.4, propGain: 1.28,
+      throttleExponent: 0.48,
+    },
+    effects: {
+      roosterTail: {
+        origin: [0, -0.26, -6.05], speedStart: 10, speedFull: 55,
+        rate: 1.25, height: 1.15, spread: 1.15,
+      },
+      exhausts: [
+        [-0.78, 0.96, -6.04],
+        [0.78, 0.96, -6.04],
+      ],
+    },
+    waterMask: {
+      // The hull is fully decked; a cockpit mask only protrudes around its
+      // exposed stern hardware and is not needed to hide interior water.
+      disabled: true,
+    },
+    rig: {
+      telescopingSteering: {
+        nodes: ['polySurface71', 'polySurface72'],
+        // Hinge at the fixed support (polySurface73), not the blade centre.
+        pivot: [0, 9.55, 85.68], axis: 'y', ratio: 1,
+        actuators: [
+          {
+            mesh: 'polySurface70_CABIN_0',
+            outer: [-9.904, 10.2, 76.549],
+            inner: [-0.842, 10.2, 90.458],
+            rodBase: 0.725, rodSplit: 0.78,
+          },
+          {
+            mesh: 'polySurface76_CABIN_0',
+            outer: [9.904, 10.2, 76.549],
+            inner: [0.842, 10.2, 90.458],
+            rodBase: 0.725, rodSplit: 0.78,
+          },
+        ],
+      },
+      existingPropellers: [
+        {
+          mesh: 'polySurface82_CABIN_0', axis: 'z', handedness: 1,
+          pivot: [-6.943, 2.809, 81.213],
+          selection: { centerZ: [80.8, 81.6] },
+        },
+        {
+          mesh: 'polySurface83_CABIN_0', axis: 'z', handedness: -1,
+          pivot: [-6.943, 2.809, 81.213],
+          selection: { centerZ: [80.8, 81.6] },
+        },
+      ],
+    },
+  }),
   zefiro: makeSpec({
     id: 'zefiro', label: 'Azure Comet', length: 6.5, beam: 2.1, height: 1.45,
     mass: 1250, restDraft: 0.24, visualDraft: 0.52, rideHeight: 0.12,

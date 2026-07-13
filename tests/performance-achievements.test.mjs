@@ -53,6 +53,14 @@ test('achievement definitions and grouped journal entries stay coherent', () => 
   }
 });
 
+test('the 50-knot milestone unlocks the racing boat', () => {
+  const milestone = ACHIEVEMENTS.find(item => item.id === 'speed-50');
+  assert.equal(milestone.target, 50);
+  assert.equal(milestone.metric, 'bestSpeedKn');
+  assert.equal(milestone.reward, 'racer');
+  assert.match(milestone.description, /Redline Phantom/);
+});
+
 test('air-time progress accumulates while airborne without waiting for landing', () => {
   const manager = Object.create(AchievementManager.prototype);
   manager.state = {

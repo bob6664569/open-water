@@ -1,7 +1,7 @@
 # Audio sources and licenses
 
-All recordings listed below were published under the Creative Commons Zero
-1.0 Universal dedication (CC0 1.0):
+Except for the Redline Phantom engine noted below, the recordings listed here
+were published under the Creative Commons Zero 1.0 Universal dedication (CC0 1.0):
 https://creativecommons.org/publicdomain/zero/1.0/
 
 The files shipped with this project are edited derivatives of the Freesound
@@ -21,6 +21,15 @@ loudness-normalized, and encoded as MP3 for browser playback.
   https://freesound.org/s/212441/
 - `engines/yacht-*.mp3`: “Marine diesel engine” by AugustSandberg,
   https://freesound.org/s/264864/
+- `engines/racer-full.wav`: the complete supplied “sonido interno del motor”
+  recording. It plays once from the beginning, then the game crossfades into a
+  seamless runtime loop built only from the final high-rev section,
+  “sonido interno del motor” supplied for the Redline Phantom,
+  https://sounds.sfxengine.com/sonido-interno-del-motor--q3s7tscu.wav.
+  Licensed for use in personal and commercial projects under the
+  [SFX Engine Terms of Service](https://sfxengine.com/terms-of-service);
+  the source recording and these derivatives must not be redistributed as
+  standalone sound-effect files.
 
 ## Weather
 

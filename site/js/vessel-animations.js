@@ -205,6 +205,76 @@ function extractExistingComponents(mesh, selection, pivotCenter,
   return pivot;
 }
 
+function actuatorGeometryParts(mesh, root, outer, inner, rodSplit) {
+  const source = mesh?.geometry;
+  const index = source?.index;
+  const position = source?.attributes.position;
+  if (!index || !position || !mesh.parent) return null;
+
+  root.updateWorldMatrix(true, true);
+  mesh.updateWorldMatrix(true, false);
+  const relative = new THREE.Matrix4()
+    .copy(root.matrixWorld).invert().multiply(mesh.matrixWorld);
+  const baked = source.clone().applyMatrix4(relative);
+  const bakedPosition = baked.attributes.position;
+  const bakedIndices = baked.index.array;
+  if (relative.determinant() < 0) {
+    for (let i = 0; i < bakedIndices.length; i += 3) {
+      const swap = bakedIndices[i + 1];
+      bakedIndices[i + 1] = bakedIndices[i + 2];
+      bakedIndices[i + 2] = swap;
+    }
+  }
+
+  const axis = new THREE.Vector3().subVectors(inner, outer);
+  const lengthSq = axis.lengthSq();
+  if (lengthSq < 1e-6) {
+    baked.dispose();
+    return null;
+  }
+  const barrelIndices = [];
+  const rodIndices = [];
+  const centroid = new THREE.Vector3();
+  for (let i = 0; i < bakedIndices.length; i += 3) {
+    centroid.set(0, 0, 0);
+    for (let corner = 0; corner < 3; corner++) {
+      const vertex = bakedIndices[i + corner];
+      centroid.x += bakedPosition.getX(vertex);
+      centroid.y += bakedPosition.getY(vertex);
+      centroid.z += bakedPosition.getZ(vertex);
+    }
+    centroid.multiplyScalar(1 / 3).sub(outer);
+    const destination = centroid.dot(axis) / lengthSq >= rodSplit
+      ? rodIndices : barrelIndices;
+    destination.push(
+      bakedIndices[i], bakedIndices[i + 1], bakedIndices[i + 2],
+    );
+  }
+  if (!barrelIndices.length || !rodIndices.length) {
+    baked.dispose();
+    return null;
+  }
+
+  const makePart = (indices, name) => {
+    const geometry = baked.clone();
+    geometry.setIndex(indices);
+    geometry.clearGroups();
+    geometry.addGroup(0, indices.length, 0);
+    const part = new THREE.Mesh(geometry, mesh.material);
+    part.name = `${mesh.name}-${name}`;
+    part.castShadow = mesh.castShadow;
+    part.receiveShadow = mesh.receiveShadow;
+    part.layers.mask = mesh.layers.mask;
+    return part;
+  };
+  const parts = {
+    barrel: makePart(barrelIndices, 'actuator-barrel'),
+    rod: makePart(rodIndices, 'actuator-rod'),
+  };
+  baked.dispose();
+  return parts;
+}
+
 function splitMeshByBox(mesh, box) {
   // Fragmented exports may spread one motor across several material meshes.
   // Return the selected geometry without a pivot so callers can group the pieces.
@@ -330,6 +400,7 @@ function createClothStrip(stripe, stripeCount, columns, rows, uvConfig = {}) {
 export class VesselAnimationRig {
   constructor(model, spec) {
     this.steerPivots = [];
+    this.steeringActuators = [];
     this.propellers = [];
     this.rotators = [];
     this.bones = [];
@@ -340,6 +411,8 @@ export class VesselAnimationRig {
     this._steer = 0;
     this._time = 0;
     this._point = new THREE.Vector3();
+    this._actuatorDirection = new THREE.Vector3();
+    this._actuatorScale = new THREE.Vector3(1, 1, 1);
     this._clothDirection = new THREE.Vector3();
     this._clothNormal = new THREE.Vector3();
     this._rotation = new THREE.Quaternion();
@@ -407,6 +480,9 @@ export class VesselAnimationRig {
         spinRate: propConfig.spinRate,
       });
     }
+    if (config.telescopingSteering) {
+      this._rigTelescopingSteering(model, config.telescopingSteering);
+    }
     if (config.modelSteer) this._rigModelSteering(model, config.modelSteer);
     if (config.regionMotors) this._rigRegionMotors(model, config.regionMotors);
     for (const controlConfig of config.nodeControls || []) {
@@ -430,6 +506,80 @@ export class VesselAnimationRig {
         axis: AXES[boneConfig.axis || 'y'],
         ratio: boneConfig.ratio || 1,
         vibration: boneConfig.vibration || 0,
+      });
+    }
+  }
+
+  _rigTelescopingSteering(model, config) {
+    const steerPivot = this._rigNodePivot(model, {
+      nodes: config.nodes,
+      pivot: config.pivot,
+    }, 'telescoping-steering');
+    if (!steerPivot) return;
+    const root = steerPivot.parent;
+    const steer = {
+      pivot: steerPivot,
+      base: steerPivot.quaternion.clone(),
+      axis: AXES[config.axis || 'y'],
+      ratio: config.ratio ?? 1,
+    };
+    this.steerPivots.push(steer);
+
+    for (const actuatorConfig of config.actuators || []) {
+      const source = model.getObjectByName(actuatorConfig.mesh);
+      if (!source?.isMesh) continue;
+      const outer = new THREE.Vector3().fromArray(actuatorConfig.outer);
+      const inner = new THREE.Vector3().fromArray(actuatorConfig.inner);
+      const rodBase = actuatorConfig.rodBase ?? 0.72;
+      const parts = actuatorGeometryParts(
+        source, root, outer, inner, actuatorConfig.rodSplit ?? rodBase,
+      );
+      if (!parts) continue;
+
+      const baseDirection = new THREE.Vector3().subVectors(inner, outer);
+      const baseLength = baseDirection.length();
+      baseDirection.multiplyScalar(1 / baseLength);
+      const barrelLength = baseLength * rodBase;
+      const baseRodLength = baseLength - barrelLength;
+      const baseRotation = new THREE.Quaternion()
+        .setFromUnitVectors(AXES.z, baseDirection);
+      const one = new THREE.Vector3(1, 1, 1);
+
+      const barrelFrame = new THREE.Group();
+      barrelFrame.name = `${source.name}-barrel-frame`;
+      barrelFrame.position.copy(outer);
+      barrelFrame.quaternion.copy(baseRotation);
+      root.add(barrelFrame);
+      const barrelInverse = new THREE.Matrix4()
+        .compose(outer, baseRotation, one).invert();
+      parts.barrel.geometry.applyMatrix4(barrelInverse);
+      parts.barrel.geometry.computeBoundingSphere();
+      barrelFrame.add(parts.barrel);
+
+      const rodStart = new THREE.Vector3()
+        .copy(baseDirection).multiplyScalar(barrelLength).add(outer);
+      const rodFrame = new THREE.Group();
+      rodFrame.name = `${source.name}-rod-frame`;
+      rodFrame.position.copy(rodStart);
+      rodFrame.quaternion.copy(baseRotation);
+      root.add(rodFrame);
+      const rodInverse = new THREE.Matrix4()
+        .compose(rodStart, baseRotation, one).invert();
+      parts.rod.geometry.applyMatrix4(rodInverse);
+      parts.rod.geometry.computeBoundingSphere();
+      rodFrame.add(parts.rod);
+
+      const target = new THREE.Object3D();
+      target.name = `${source.name}-moving-anchor`;
+      target.position.copy(inner);
+      root.add(target);
+      root.updateMatrixWorld(true);
+      steerPivot.attach(target);
+
+      source.visible = false;
+      this.steeringActuators.push({
+        root, outer, target, barrelFrame, rodFrame,
+        barrelLength, baseRodLength,
       });
     }
   }
@@ -711,6 +861,23 @@ export class VesselAnimationRig {
           control.axis, this._steer * control.ratio + vibration,
         );
         control.bone.quaternion.copy(control.base).multiply(this._rotation);
+      }
+      for (const actuator of this.steeringActuators) {
+        actuator.target.getWorldPosition(this._point);
+        actuator.root.worldToLocal(this._point);
+        this._actuatorDirection.subVectors(this._point, actuator.outer);
+        const length = this._actuatorDirection.length();
+        if (length < 1e-5) continue;
+        this._actuatorDirection.multiplyScalar(1 / length);
+        this._rotation.setFromUnitVectors(AXES.z, this._actuatorDirection);
+        actuator.barrelFrame.quaternion.copy(this._rotation);
+        actuator.rodFrame.quaternion.copy(this._rotation);
+        actuator.rodFrame.position.copy(this._actuatorDirection)
+          .multiplyScalar(actuator.barrelLength).add(actuator.outer);
+        this._actuatorScale.z = Math.max(
+          0.05, (length - actuator.barrelLength) / actuator.baseRodLength,
+        );
+        actuator.rodFrame.scale.copy(this._actuatorScale);
       }
     }
     if (this.propellers.length) {
