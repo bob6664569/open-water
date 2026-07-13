@@ -14,6 +14,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     "import { GestureDriveController } from './controllers/gesture-drive-controller.js';",
     "import { ViewInputController } from './controllers/view-input-controller.js';",
     "import { QualityController } from './runtime/quality-controller.js';",
+    "import { ExperienceController } from './ui/experience-controller.js';",
     'const drive = new DriveController(',
     'const cameraController = new CameraController(',
     'const waterPasses = new WaterPassRenderer(',
@@ -22,10 +23,12 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     'const gestureDrive = new GestureDriveController(',
     'const viewInput = new ViewInputController(',
     'const qualityController = new QualityController(',
+    'experience = new ExperienceController(',
     'void vessels.loadCatalog();',
     'drive.update(dt, waveField.time, gestureDrive.state);',
     'cameraController.update(dt);',
     'qualityController.applyPending();',
+    'experience.frameRendered();',
     'waterPasses.render(frameStart, qualityController.current);',
   ]) {
     assert.ok(mainSource.includes(contract), `missing runtime contract: ${contract}`);
