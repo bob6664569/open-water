@@ -695,31 +695,40 @@ export class VesselAnimationRig {
 
   update(dt, boat) {
     this._time += dt;
-    this._steer += (boat._effSteer - this._steer) * (1 - Math.exp(-dt * 9));
-    for (const steer of this.steerPivots) {
-      this._rotation.setFromAxisAngle(steer.axis, this._steer * steer.ratio);
-      steer.pivot.quaternion.copy(steer.base).multiply(this._rotation);
+    const hasSteering = this.steerPivots.length || this.bones.length;
+    const throttle = this.bones.length || this.propellers.length
+      ? boat.throttle : 0;
+    if (hasSteering) {
+      this._steer += (boat._effSteer - this._steer) * (1 - Math.exp(-dt * 9));
+      for (const steer of this.steerPivots) {
+        this._rotation.setFromAxisAngle(steer.axis, this._steer * steer.ratio);
+        steer.pivot.quaternion.copy(steer.base).multiply(this._rotation);
+      }
+      for (const control of this.bones) {
+        const vibration = control.vibration
+          * Math.abs(throttle) * Math.sin(this._time * 31);
+        this._rotation.setFromAxisAngle(
+          control.axis, this._steer * control.ratio + vibration,
+        );
+        control.bone.quaternion.copy(control.base).multiply(this._rotation);
+      }
     }
-    for (const control of this.bones) {
-      const vibration = control.vibration
-        * Math.abs(boat.throttle) * Math.sin(this._time * 31);
-      this._rotation.setFromAxisAngle(
-        control.axis, this._steer * control.ratio + vibration,
-      );
-      control.bone.quaternion.copy(control.base).multiply(this._rotation);
-    }
-    const throttleAbs = Math.abs(boat.throttle);
-    for (const propeller of this.propellers) {
-      const spinRate = boat.throttle
-        * (propeller.spinRate ?? (8 + 42 * throttleAbs));
-      propeller.pivot.rotation[propeller.axis] +=
-        spinRate * propeller.handedness * dt;
+    if (this.propellers.length) {
+      const throttleAbs = Math.abs(throttle);
+      for (const propeller of this.propellers) {
+        const spinRate = throttle
+          * (propeller.spinRate ?? (8 + 42 * throttleAbs));
+        propeller.pivot.rotation[propeller.axis] +=
+          spinRate * propeller.handedness * dt;
+      }
     }
     for (const rotator of this.rotators) {
       rotator.pivot.rotation[rotator.axis] += rotator.rate * dt;
     }
-    const seaHeight = boat.wf?.significantWaveHeight ?? 0.9;
+    const seaHeight = this.flags.length
+      ? boat.wf?.significantWaveHeight ?? 0.9 : 0;
     if (this._navCfg) this._updateNavLights(boat);
+    if (!this.flags.length) return;
     const stormWind = THREE.MathUtils.smoothstep(seaHeight, 0.9, 5.2);
     const flagAir = THREE.MathUtils.clamp(
       0.28 + boat.speedKn / 30 + stormWind * 0.72, 0.28, 1.35,

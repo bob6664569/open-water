@@ -303,6 +303,36 @@ test('vessel rigs reuse propeller world-position vectors', () => {
   assert.ok(reused.every((position, i) => position.x === firstPositions[i].x + 5));
 });
 
+test('vessel rigs skip inactive animation inputs without changing active motion', () => {
+  const unusedInput = name => ({
+    get() { throw new Error(`${name} should not be read`); },
+  });
+  const staticRig = new VesselAnimationRig(new THREE.Group(), { rig: {} });
+  const staticBoat = {};
+  Object.defineProperties(staticBoat, {
+    _effSteer: unusedInput('steering'),
+    throttle: unusedInput('throttle'),
+    wf: unusedInput('wave field'),
+    speedKn: unusedInput('speed'),
+  });
+  staticRig.update(0.25, staticBoat);
+  assert.equal(staticRig._time, 0.25);
+
+  const propellerRig = new VesselAnimationRig(new THREE.Group(), { rig: {} });
+  const pivot = new THREE.Group();
+  propellerRig.propellers.push({
+    pivot, axis: 'z', handedness: -1,
+  });
+  const propellerBoat = { throttle: 0.5 };
+  Object.defineProperties(propellerBoat, {
+    _effSteer: unusedInput('steering'),
+    wf: unusedInput('wave field'),
+    speedKn: unusedInput('speed'),
+  });
+  propellerRig.update(0.25, propellerBoat);
+  assert.equal(pivot.rotation.z, -3.625);
+});
+
 test('foam trail batches every active splat into one instanced draw', () => {
   const foam = new FoamTrail();
   const renderCalls = [];
