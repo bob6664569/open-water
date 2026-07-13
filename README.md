@@ -20,6 +20,10 @@ docker compose up -d
 
 → http://localhost:8930
 
+The nginx container compresses JavaScript, JSON, GLB and HDR responses and sends
+ETag validators. Assets are revalidated because their URLs are stable rather than
+content-hashed, so a deployment cannot leave an old model or script in cache.
+
 ## Controls
 
 - Z/W or Up arrow: throttle (the lever stays put)
