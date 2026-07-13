@@ -20,6 +20,8 @@ import { BoatHud } from './ui/hud.js';
 import { DriveController } from './controllers/drive-controller.js';
 import { CameraController } from './controllers/camera-controller.js';
 import { VesselController } from './controllers/vessel-controller.js';
+import { GestureDriveController } from './controllers/gesture-drive-controller.js';
+import { ViewInputController } from './controllers/view-input-controller.js';
 
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
@@ -416,16 +418,21 @@ function updatePerformanceHud(now) {
   ].join('\n');
 }
 
+const gestureDrive = new GestureDriveController({
+  element: document.getElementById('gesture-drive'),
+  tutorialElement: document.getElementById('drive-tutorial'),
+  audio,
+  onEngage: dismissVoyageIntro,
+});
+gestureDrive.bind();
+
 function resetBoat() {
   drive.resetOutput();
   boat.reset();
   achievements.resetFlight();
   achievements.resetCircle();
   cameraController.resetVessel();
-  resetGestureDrive();
-}
-function cycleCamera() {
-  cameraController.cycle();
+  gestureDrive.reset();
 }
 
 addEventListener('keydown', (e) => {
@@ -433,7 +440,7 @@ addEventListener('keydown', (e) => {
   audio.start();
   drive.press(e.code);
   if (e.code === 'KeyR') resetBoat();
-  if (e.code === 'KeyC') cycleCamera();
+  if (e.code === 'KeyC') cameraController.cycle();
   if (e.code === 'KeyB') e.shiftKey ? vessels.previous() : vessels.next();
   if (e.code === 'KeyL') achievements.togglePanel(false);
   const states = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4 };
@@ -442,136 +449,10 @@ addEventListener('keydown', (e) => {
   }
 });
 addEventListener('keyup', (e) => drive.release(e.code));
-addEventListener('blur', () => { drive.clearInput(); resetGestureDrive(); });
+addEventListener('blur', () => { drive.clearInput(); gestureDrive.reset(); });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { drive.clearInput(); resetGestureDrive(); }
+  if (document.hidden) { drive.clearInput(); gestureDrive.reset(); }
 });
-
-const gestureDrive = document.getElementById('gesture-drive');
-const driveTutorial = document.getElementById('drive-tutorial');
-const driveVector = gestureDrive?.querySelector('.drive-vector');
-const gestureState = { active: false, id: null, originX: 0, originY: 0, throttle: 0, steer: 0 };
-const DRIVE_RADIUS = 76;
-const DRIVE_DEADZONE = 0.09;
-const TUTORIAL_DISMISS_DISTANCE = 14;
-const DRIVE_HINT_IDLE_DELAY = 20_000;
-let driveIdleTimer = null;
-let driveHasBeenUsed = false;
-let driveTutorialAvailable = true;
-
-function waitForDriveHintIdle() {
-  if (!driveHasBeenUsed) return;
-  clearTimeout(driveIdleTimer);
-  gestureDrive?.classList.add('awaiting-drive-idle');
-  driveIdleTimer = setTimeout(() => {
-    driveIdleTimer = null;
-    driveTutorialAvailable = true;
-    gestureDrive?.classList.remove('awaiting-drive-idle');
-  }, DRIVE_HINT_IDLE_DELAY);
-}
-
-function beginDriveHintCooldown() {
-  const showTutorial = driveTutorialAvailable;
-  driveHasBeenUsed = true;
-  driveTutorialAvailable = false;
-  clearTimeout(driveIdleTimer);
-  driveIdleTimer = null;
-  gestureDrive?.classList.add('awaiting-drive-idle');
-  return showTutorial;
-}
-
-function driveAxis(delta) {
-  const raw = THREE.MathUtils.clamp(delta / DRIVE_RADIUS, -1, 1);
-  if (Math.abs(raw) <= DRIVE_DEADZONE) return 0;
-  return Math.sign(raw) * (Math.abs(raw) - DRIVE_DEADZONE) / (1 - DRIVE_DEADZONE);
-}
-function updateDriveVector(clientX, clientY) {
-  if (!driveVector) return;
-  const dx = clientX - gestureState.originX;
-  const dy = clientY - gestureState.originY;
-  const length = Math.min(Math.hypot(dx, dy), DRIVE_RADIUS);
-  const scale = Math.hypot(dx, dy) > DRIVE_RADIUS ? DRIVE_RADIUS / Math.hypot(dx, dy) : 1;
-  driveVector.style.setProperty('--drive-x', `${gestureState.originX}px`);
-  driveVector.style.setProperty('--drive-y', `${gestureState.originY}px`);
-  driveVector.style.setProperty('--drive-end-x', `${dx * scale}px`);
-  driveVector.style.setProperty('--drive-end-y', `${dy * scale}px`);
-  driveVector.style.setProperty('--drive-length', `${length}px`);
-  driveVector.style.setProperty('--drive-angle', `${Math.atan2(dy, dx) * 180 / Math.PI + 90}deg`);
-}
-function resetGestureDrive() {
-  gestureState.active = false;
-  gestureState.id = null;
-  gestureState.throttle = 0;
-  gestureState.steer = 0;
-  gestureDrive?.classList.remove('active');
-  driveTutorial?.classList.remove('visible');
-  gestureDrive?.setAttribute('aria-valuetext', 'Neutral');
-  waitForDriveHintIdle();
-}
-function updateGestureFromPointer(e) {
-  const dx = e.clientX - gestureState.originX;
-  const dy = e.clientY - gestureState.originY;
-  gestureState.throttle = driveAxis(gestureState.originY - e.clientY);
-  gestureState.steer = driveAxis(e.clientX - gestureState.originX);
-  updateDriveVector(e.clientX, e.clientY);
-  if (Math.hypot(dx, dy) >= TUTORIAL_DISMISS_DISTANCE) {
-    driveTutorial?.classList.remove('visible');
-  }
-  const power = Math.round(Math.abs(gestureState.throttle) * 100);
-  const turn = Math.round(Math.abs(gestureState.steer) * 100);
-  const motion = gestureState.throttle > 0 ? `forward ${power}%`
-    : gestureState.throttle < 0 ? `reverse ${power}%` : 'neutral';
-  const heading = gestureState.steer > 0 ? `right ${turn}%`
-    : gestureState.steer < 0 ? `left ${turn}%` : 'centered';
-  gestureDrive?.setAttribute('aria-valuetext', `${motion}, ${heading}`);
-}
-if (gestureDrive) {
-  gestureDrive.addEventListener('pointerdown', (e) => {
-    if (e.button !== undefined && e.button !== 0) return;
-    if (gestureState.active) {
-      if (e.pointerId === gestureState.id) return;
-      resetGestureDrive();
-    }
-    e.preventDefault();
-    audio.start();
-    dismissVoyageIntro();
-    const showTutorial = beginDriveHintCooldown();
-    gestureState.active = true;
-    gestureState.id = e.pointerId;
-    gestureState.originX = e.clientX;
-    gestureState.originY = e.clientY;
-    gestureDrive.classList.add('active');
-    try { gestureDrive.setPointerCapture(e.pointerId); } catch {}
-    updateGestureFromPointer(e);
-    if (navigator.vibrate) navigator.vibrate(12);
-    driveTutorial?.classList.toggle('visible', showTutorial);
-  });
-  gestureDrive.addEventListener('pointermove', (e) => {
-    if (!gestureState.active || e.pointerId !== gestureState.id) return;
-    e.preventDefault();
-    updateGestureFromPointer(e);
-  });
-  const releaseGesture = (e) => {
-    if (!gestureState.active || (e.pointerId !== undefined && e.pointerId !== gestureState.id)) return;
-    resetGestureDrive();
-    if (navigator.vibrate) navigator.vibrate(8);
-  };
-  gestureDrive.addEventListener('pointerup', releaseGesture);
-  gestureDrive.addEventListener('pointercancel', releaseGesture);
-  gestureDrive.addEventListener('lostpointercapture', releaseGesture);
-
-  addEventListener('pointerup', releaseGesture, true);
-  addEventListener('pointercancel', releaseGesture, true);
-  addEventListener('touchend', (e) => {
-    if (!gestureState.active) return;
-    const endedOnDrive = e.target instanceof Node && gestureDrive.contains(e.target);
-    if (endedOnDrive || e.touches.length === 0) resetGestureDrive();
-  }, { passive: true, capture: true });
-  addEventListener('touchcancel', () => {
-    if (gestureState.active) resetGestureDrive();
-  }, { passive: true, capture: true });
-  addEventListener('pagehide', resetGestureDrive);
-}
 
 function setWaveIntensity(level, { userInitiated = false } = {}) {
   if (!SEA_PRESETS[level]) return;
@@ -607,85 +488,15 @@ document.querySelectorAll('.wave-option').forEach(button => {
 syncSeaControlAccess();
 setWaveIntensity(seaControlsUnlocked() ? storedWaveIntensity() : 2);
 
-const dragPointers = new Map();
-let pinchStartDist = 0, pinchStartZoom = 0;
-const VIEW_TAP_MAX_DURATION = 280;
-const VIEW_TAP_MAX_MOVEMENT = 18;
-const VIEW_DOUBLE_TAP_DELAY = 340;
-const VIEW_DOUBLE_TAP_DISTANCE = 48;
-let lastViewTap = null;
-
-function registerViewTap(e, pointer) {
-  if (!IS_TOUCH || e.pointerType !== 'touch' || !appStarted || gestureState.active) return;
-  const now = performance.now();
-  const moved = Math.hypot(e.clientX - pointer.startX, e.clientY - pointer.startY);
-  if (pointer.multiTouch || moved > VIEW_TAP_MAX_MOVEMENT
-    || now - pointer.startTime > VIEW_TAP_MAX_DURATION) {
-    lastViewTap = null;
-    return;
-  }
-  if (lastViewTap && now - lastViewTap.time <= VIEW_DOUBLE_TAP_DELAY
-    && Math.hypot(e.clientX - lastViewTap.x, e.clientY - lastViewTap.y)
-      <= VIEW_DOUBLE_TAP_DISTANCE) {
-    lastViewTap = null;
-    cycleCamera();
-    return;
-  }
-  lastViewTap = { time: now, x: e.clientX, y: e.clientY };
-}
-
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  audio.start();
-  dragPointers.set(e.pointerId, {
-    x: e.clientX,
-    y: e.clientY,
-    startX: e.clientX,
-    startY: e.clientY,
-    startTime: performance.now(),
-    multiTouch: false,
-  });
-  if (dragPointers.size === 2) {
-    dragPointers.forEach(pointer => { pointer.multiTouch = true; });
-    const [a, b] = [...dragPointers.values()];
-    pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
-    pinchStartZoom = cameraController.activeZoom();
-  }
+const viewInput = new ViewInputController({
+  element: renderer.domElement,
+  cameraController,
+  audio,
+  isTouch: IS_TOUCH,
+  isAppStarted: () => appStarted,
+  isGestureActive: () => gestureDrive.state.active,
 });
-addEventListener('pointermove', (e) => {
-  const p = dragPointers.get(e.pointerId);
-  if (!p) return;
-  const prevX = p.x, prevY = p.y;
-  p.x = e.clientX; p.y = e.clientY;
-  if (dragPointers.size >= 2) {
-    const [a, b] = [...dragPointers.values()];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinchStartDist > 0 && d > 0) {
-      cameraController.setActiveZoom(pinchStartZoom * pinchStartDist / d);
-    }
-  } else if (gestureState.active && IS_TOUCH) {
-    cameraController.orbitHoriz(e.clientX - prevX);
-    cameraController.setActiveZoom(
-      cameraController.activeZoom() * Math.exp((e.clientY - prevY) * 0.008),
-    );
-  } else {
-    cameraController.orbitHoriz(e.clientX - prevX);
-    cameraController.orbitPitchBy(e.clientY - prevY);
-  }
-});
-function endDrag(e) {
-  const pointer = dragPointers.get(e.pointerId);
-  if (pointer && e.type === 'pointerup') registerViewTap(e, pointer);
-  dragPointers.delete(e.pointerId);
-  if (dragPointers.size < 2) pinchStartDist = 0;
-}
-addEventListener('pointerup', endDrag);
-addEventListener('pointercancel', endDrag);
-addEventListener('wheel', (e) => {
-  if (e.target instanceof Element && e.target.closest('#achievements-panel')) return;
-  cameraController.setActiveZoom(
-    cameraController.activeZoom() * Math.exp(e.deltaY * 0.0012),
-  );
-}, { passive: true });
+viewInput.bind();
 
 const elKn = document.getElementById('kn');
 const elThrottle = document.querySelector('#throttle i');
@@ -722,7 +533,7 @@ renderer.setAnimationLoop(() => {
   const dt = appStarted ? frameDt : 0;
   waveField.update(dt, boat.pos.x, boat.pos.z);
   environment.updateAtmosphere(dt);
-  drive.update(dt, waveField.time, gestureState);
+  drive.update(dt, waveField.time, gestureDrive.state);
   boat.update(dt);
   achievements.update(dt, boat, waveField, fauna.achievementSources);
   ocean.update(dt, boat.pos.x, boat.pos.z, boat);
