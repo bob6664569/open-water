@@ -1146,10 +1146,43 @@ function orbitHoriz(dx) {
 }
 const dragPointers = new Map();
 let pinchStartDist = 0, pinchStartZoom = 0;
+const VIEW_TAP_MAX_DURATION = 280;
+const VIEW_TAP_MAX_MOVEMENT = 18;
+const VIEW_DOUBLE_TAP_DELAY = 340;
+const VIEW_DOUBLE_TAP_DISTANCE = 48;
+let lastViewTap = null;
+
+function registerViewTap(e, pointer) {
+  if (!IS_TOUCH || e.pointerType !== 'touch' || !appStarted || gestureState.active) return;
+  const now = performance.now();
+  const moved = Math.hypot(e.clientX - pointer.startX, e.clientY - pointer.startY);
+  if (pointer.multiTouch || moved > VIEW_TAP_MAX_MOVEMENT
+    || now - pointer.startTime > VIEW_TAP_MAX_DURATION) {
+    lastViewTap = null;
+    return;
+  }
+  if (lastViewTap && now - lastViewTap.time <= VIEW_DOUBLE_TAP_DELAY
+    && Math.hypot(e.clientX - lastViewTap.x, e.clientY - lastViewTap.y)
+      <= VIEW_DOUBLE_TAP_DISTANCE) {
+    lastViewTap = null;
+    cycleCamera();
+    return;
+  }
+  lastViewTap = { time: now, x: e.clientX, y: e.clientY };
+}
+
 renderer.domElement.addEventListener('pointerdown', (e) => {
   audio.start();
-  dragPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  dragPointers.set(e.pointerId, {
+    x: e.clientX,
+    y: e.clientY,
+    startX: e.clientX,
+    startY: e.clientY,
+    startTime: performance.now(),
+    multiTouch: false,
+  });
   if (dragPointers.size === 2) {
+    dragPointers.forEach(pointer => { pointer.multiTouch = true; });
     const [a, b] = [...dragPointers.values()];
     pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
     pinchStartZoom = activeZoom();
@@ -1182,6 +1215,8 @@ addEventListener('pointermove', (e) => {
   }
 });
 function endDrag(e) {
+  const pointer = dragPointers.get(e.pointerId);
+  if (pointer && e.type === 'pointerup') registerViewTap(e, pointer);
   dragPointers.delete(e.pointerId);
   if (dragPointers.size < 2) pinchStartDist = 0;
 }
