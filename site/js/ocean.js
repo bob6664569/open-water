@@ -144,7 +144,7 @@ export class Ocean {
       uSeaState: { value: 1 },
       uWaveDirs: { value: u.dirs },
       uWaveAmps: { value: u.amps },
-      uSteepSum: { value: waveField.steepnessSum() },
+      uSteepSum: { value: waveField.totalSteepness },
       uNormalTex: { value: makeWaterNormalTexture() },
       uBoat: { value: new THREE.Vector4(0, 0, 0, 1) },
       uBoatSpeed: { value: 0 },
@@ -594,7 +594,7 @@ export class Ocean {
   update(dt, focusX, focusZ, boat) {
     this.uniforms.uTime.value = this.waveField.time;
     this.uniforms.uSeaState.value = this.waveField.seaState;
-    this.uniforms.uSteepSum.value = Math.max(this.waveField.steepnessSum(), 0.001);
+    this.uniforms.uSteepSum.value = Math.max(this.waveField.totalSteepness, 0.001);
     const fc = this.farCell;
     this.mesh.position.set(Math.round(focusX / fc) * fc, 0,
                            Math.round(focusZ / fc) * fc);

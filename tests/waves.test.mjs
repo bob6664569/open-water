@@ -16,6 +16,7 @@ test('the generated spectrum is deterministic and normalized to Hs', () => {
   );
   assert.ok(Math.abs(4 * standardDeviation - first.significantWaveHeight) < 1e-12);
   assert.ok(first.steepnessSum() <= 0.6200001);
+  assert.equal(first.totalSteepness, first.steepnessSum());
 });
 
 test('sea presets transition smoothly and invalid presets are ignored', () => {
@@ -30,6 +31,7 @@ test('sea presets transition smoothly and invalid presets are ignored', () => {
   assert.ok(field.significantWaveHeight < SEA_PRESETS[4].hs);
   assert.ok(field.peakPeriod > SEA_PRESETS[2].tp);
   assert.ok(field.peakPeriod < SEA_PRESETS[4].tp);
+  assert.equal(field.totalSteepness, field.steepnessSum());
 
   field.setSeaPreset(99);
   assert.equal(field.preset, 4);

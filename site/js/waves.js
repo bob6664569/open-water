@@ -79,6 +79,10 @@ export class WaveField {
       Q: 0,
       omega: 0,
     }));
+    this._spectrumVariance = this.waves.reduce(
+      (sum, wave) => sum + wave.weight * wave.weight * 0.5, 0,
+    );
+    this.totalSteepness = 0;
     this._dirs = this.waves.map(() => new THREE.Vector4());
     this._amps = this.waves.map(() => new THREE.Vector3());
     this._tmp = new THREE.Vector3();
@@ -114,9 +118,8 @@ export class WaveField {
   }
 
   _syncSpectrum(dt, anchorX = 0, anchorZ = 0) {
-    let variance = 0;
-    for (const w of this.waves) variance += w.weight * w.weight * 0.5;
-    const energyScale = (this.significantWaveHeight / 4) / Math.sqrt(variance);
+    const energyScale = (this.significantWaveHeight / 4)
+      / Math.sqrt(this._spectrumVariance);
 
     let rawSteepness = 0;
     for (const w of this.waves) {
@@ -135,14 +138,17 @@ export class WaveField {
     }
     const qScale = Math.min(1, 0.62 / Math.max(rawSteepness, 1e-6));
 
+    let totalSteepness = 0;
     for (let i = 0; i < this.waves.length; i++) {
       const w = this.waves[i];
       w.Q = 0.72 * qScale;
+      totalSteepness += w.Q * w.k * w.A;
       w.phase -= w.omega * dt;
       w.phase = THREE.MathUtils.euclideanModulo(w.phase + Math.PI, TAU) - Math.PI;
       this._dirs[i].set(w.dx, w.dz, w.k, w.omega);
       this._amps[i].set(w.A, w.Q, w.phase);
     }
+    this.totalSteepness = totalSteepness;
   }
 
   displacement(x0, z0, out) {
