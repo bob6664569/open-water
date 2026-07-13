@@ -87,6 +87,13 @@ parameter in the URL takes priority for benchmarks and shared links.
 Without `quality`, the mode stays automatic: downgrades are quick when the budget
 is exceeded and upgrades deliberately slow to avoid oscillation.
 
+For reproducible CPU measurements of the wave hot paths, run
+`npm run benchmark`. Archive a machine-readable reference with
+`npm run --silent benchmark -- --json > baseline.json`, then compare a later run with
+`npm run benchmark -- --baseline baseline.json --max-regression 15`. The command
+returns a non-zero status when a median regression exceeds the allowed percentage.
+Use `--quick` for a short smoke run; performance comparisons should use the full run.
+
 On touch devices, the initial load uses a 1K half-float HDR, downloads audio only
 after the start gesture, and loads only the active preset's wildlife. Wildlife
 GLBs are decoded sequentially to avoid Safari/iOS memory spikes. Very heavy boats

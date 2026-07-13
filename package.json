@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "benchmark": "node --disable-warning=ExperimentalWarning --import ./tests/register-three.mjs tools/benchmark.mjs",
     "lint": "npm run lint:js && npm run lint:html",
     "lint:js": "eslint .",
     "lint:html": "html-validate site/index.html",
