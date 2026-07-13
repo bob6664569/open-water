@@ -229,6 +229,7 @@ export class Ocean {
     this.uniforms = {
       uTime: { value: 0 },
       uSeaState: { value: 1 },
+      uWind: { value: new THREE.Vector3(0, 0, 1) },
       uWaveDirs: { value: u.dirs },
       uWaveAmps: { value: u.amps },
       uSteepSum: { value: waveField.totalSteepness },
@@ -329,6 +330,7 @@ export class Ocean {
           #include <common>
           uniform float uTime;
           uniform float uSeaState;
+          uniform vec3 uWind;
           uniform vec4 uWaveDirs[WAVE_COUNT];
           uniform vec3 uWaveAmps[WAVE_COUNT];
           uniform vec4 uBoat;
@@ -444,6 +446,7 @@ export class Ocean {
           #include <common>
           uniform float uTime;
           uniform float uSeaState;
+          uniform vec3 uWind;
           uniform vec4 uWaveDirs[WAVE_COUNT];
           uniform vec3 uWaveAmps[WAVE_COUNT];
           uniform float uSteepSum;
@@ -495,12 +498,13 @@ export class Ocean {
               rN.z -= d.y * ka;
             }
 
+            float windSpeed = length(uWind.xz);
             vec2 s1 = texture2D(uNormalTex, vOWorldPos.xz * 0.037
                         + vec2(uTime * 0.011, uTime * 0.006)).xy * 2.0 - 1.0;
             vec2 rot = vec2(vOWorldPos.z, -vOWorldPos.x);
             vec2 s2 = texture2D(uNormalTex, rot * 0.145
                         - vec2(uTime * 0.02, -uTime * 0.012)).xy * 2.0 - 1.0;
-            float rippleStrength = clamp(0.46 + uSeaState * 0.54, 0.42, 1.45);
+            float rippleStrength = clamp(0.36 + windSpeed * 0.057, 0.4, 1.52);
             vec2 sTex = (s1 * 0.20 + s2.yx * vec2(-0.18, 0.18))
                       * rippleStrength;
             normal = normalize(normal + rN * rippleFade
@@ -676,9 +680,14 @@ export class Ocean {
   }
 
   _fwd = new THREE.Vector3();
+  _wind = new THREE.Vector3();
   update(dt, focusX, focusZ, boat) {
     this.uniforms.uTime.value = this.waveField.time;
     this.uniforms.uSeaState.value = this.waveField.seaState;
+    if (typeof this.waveField.windAt === 'function') {
+      this.waveField.windAt(focusX, focusZ, this._wind);
+      this.uniforms.uWind.value.copy(this._wind);
+    }
     this.uniforms.uSteepSum.value = Math.max(this.waveField.totalSteepness, 0.001);
     const fc = this.farCell;
     this.mesh.position.set(Math.round(focusX / fc) * fc, 0,

@@ -51,8 +51,8 @@ function flatWater() {
   };
 }
 
-function makeBoat() {
-  return new Boat(flatWater(), new THREE.Scene(), 0.37);
+function makeBoat(water = flatWater()) {
+  return new Boat(water, new THREE.Scene(), 0.37);
 }
 
 function finiteVector(vector) {
@@ -88,13 +88,64 @@ test('reset restores the configured ride height, heading and zero motion', () =>
   boat.pos.set(10, 8, -4);
   boat.vel.set(3, -2, 1);
   boat.angVelB.set(0.2, 0.3, -0.4);
+  boat.speedKn = 12;
+  boat.groundSpeedKn = 11;
   boat.reset();
 
   assert.deepEqual(boat.pos.toArray(), [0, boat.spec.rideHeight, 0]);
   assert.deepEqual(boat.vel.toArray(), [0, 0, 0]);
   assert.deepEqual(boat.angVelB.toArray(), [0, 0, 0]);
+  assert.equal(boat.speedKn, 0);
+  assert.equal(boat.groundSpeedKn, 0);
   const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(boat.quat);
   assert.ok(Math.abs(Math.atan2(forward.x, forward.z) - 0.37) < 1e-12);
+});
+
+test('a paused pre-voyage frame does not report current as boat speed', () => {
+  const current = new THREE.Vector3(0.8, 0, 0.1);
+  const boat = makeBoat({
+    ...flatWater(),
+    velocityAt: (_x, _z, out) => out.copy(current),
+    currentAt: (_x, _z, out) => out.copy(current),
+  });
+
+  boat.update(0);
+
+  assert.equal(boat.speedKn, 0);
+  assert.equal(boat.groundSpeedKn, 0);
+});
+
+test('surface current advects an unpowered hull and reports water versus ground speed', () => {
+  const current = new THREE.Vector3(0.8, 0, 0.1);
+  const water = {
+    ...flatWater(),
+    velocityAt: (_x, _z, out) => out.copy(current),
+    currentAt: (_x, _z, out) => out.copy(current),
+  };
+  const boat = makeBoat(water);
+  boat.setPerformanceBudget({ physicsHz: 120, physicsMaxSteps: 5 });
+
+  for (let frame = 0; frame < 600; frame++) boat.update(1 / 60);
+
+  assert.ok(boat.vel.x > 0.15, `current drift was ${boat.vel.x.toFixed(3)} m/s`);
+  assert.ok(boat.groundSpeedKn > 0.3);
+  assert.deepEqual(boat.surfaceCurrent.toArray(), current.toArray());
+  assert.ok(boat.speedKn < current.length() * 1.94384);
+});
+
+test('crosswind creates leeway and a heeling moment above the center of gravity', () => {
+  const water = {
+    ...flatWater(),
+    windAt: (_x, _z, out) => out.set(18, 0, 0),
+  };
+  const boat = makeBoat(water);
+  boat._step(1 / 120);
+
+  assert.ok(boat.vel.x > 0);
+  assert.ok(Math.abs(boat.angVelB.z) > 1e-8);
+  boat.update(1 / 60);
+  assert.ok(boat.apparentWindSpeed > 17);
+  assert.ok(boat.apparentWind.x > 0);
 });
 
 test('every vessel remains finite during deterministic fixed-step simulation', async t => {

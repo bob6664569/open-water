@@ -839,10 +839,13 @@ export class BoatAudio {
 
     const seaHeight = this.wf ? this.wf.significantWaveHeight : 0.9;
     const storm = smoothstep(seaHeight, 3.0, 5.2);
+    const apparentWind = Number.isFinite(boat.apparentWindSpeed)
+      ? boat.apparentWindSpeed
+      : speed + storm * 12;
     setSmooth(this.windGain.gain,
-      Math.min(0.32, speed * 0.009 + storm * 0.19), now, 0.3);
+      Math.min(0.34, apparentWind * 0.011 + storm * 0.045), now, 0.24);
     setSmooth(this.windFilter.frequency,
-      390 + speed * 27 + storm * 480, now, 0.3);
+      360 + apparentWind * 31 + storm * 180, now, 0.24);
 
     const sea = clamp01((seaHeight - 0.35) / (5.2 - 0.35));
     const firstBlend = clamp01(sea / 0.48);

@@ -3,13 +3,35 @@ import * as THREE from 'three';
 const G = 9.81;
 const TAU = Math.PI * 2;
 const REFERENCE_HS = 1.5;
+const DEG = Math.PI / 180;
 
+// Wind/current directions point toward the flow and share the spectrum's +X angle origin.
 export const SEA_PRESETS = {
-  1: { name: 'Calm', hs: 0.35, tp: 4.5 },
-  2: { name: 'Rolling', hs: 0.9, tp: 5.4 },
-  3: { name: 'Rough', hs: 2.4, tp: 6.1 },
-  4: { name: 'Stormy', hs: 5.2, tp: 6.4 },
+  1: {
+    name: 'Calm', hs: 0.35, tp: 4.5,
+    windSpeed: 2.4, windDirection: 22 * DEG, gustiness: 0.12,
+    currentSpeed: 0.12, currentDirection: 68 * DEG,
+  },
+  2: {
+    name: 'Rolling', hs: 0.9, tp: 5.4,
+    windSpeed: 6.2, windDirection: 12 * DEG, gustiness: 0.22,
+    currentSpeed: 0.22, currentDirection: 72 * DEG,
+  },
+  3: {
+    name: 'Rough', hs: 2.4, tp: 6.1,
+    windSpeed: 11.8, windDirection: 4 * DEG, gustiness: 0.34,
+    currentSpeed: 0.38, currentDirection: 78 * DEG,
+  },
+  4: {
+    name: 'Stormy', hs: 5.2, tp: 6.4,
+    windSpeed: 20.5, windDirection: -8 * DEG, gustiness: 0.48,
+    currentSpeed: 0.62, currentDirection: 88 * DEG,
+  },
 };
+
+function angleDelta(from, to) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
 
 function makeRng(seed) {
   let s = seed;
@@ -64,11 +86,23 @@ export class WaveField {
   constructor() {
     this.time = 0;
     this.preset = 2;
-    this.significantWaveHeight = SEA_PRESETS[2].hs;
-    this.peakPeriod = SEA_PRESETS[2].tp;
+    const initial = SEA_PRESETS[this.preset];
+    this.significantWaveHeight = initial.hs;
+    this.peakPeriod = initial.tp;
     this.targetHs = this.significantWaveHeight;
     this.targetTp = this.peakPeriod;
     this.seaState = this.significantWaveHeight / REFERENCE_HS;
+    this.windSpeed = initial.windSpeed;
+    this.windDirection = initial.windDirection;
+    this.gustiness = initial.gustiness;
+    this.targetWindSpeed = this.windSpeed;
+    this.targetWindDirection = this.windDirection;
+    this.targetGustiness = this.gustiness;
+    this.currentSpeed = initial.currentSpeed;
+    this.currentDirection = initial.currentDirection;
+    this.targetCurrentSpeed = this.currentSpeed;
+    this.targetCurrentDirection = this.currentDirection;
+    this.gustFactor = 1;
 
     this.waves = makeSpectrum().map(component => ({
       ...component,
@@ -88,6 +122,7 @@ export class WaveField {
     this._tmp = new THREE.Vector3();
     this._material = new THREE.Vector3();
     this._velocityTmp = new THREE.Vector3();
+    this._currentTmp = new THREE.Vector3();
     this._syncSpectrum(0);
   }
 
@@ -97,6 +132,11 @@ export class WaveField {
     this.preset = index;
     this.targetHs = preset.hs;
     this.targetTp = preset.tp;
+    this.targetWindSpeed = preset.windSpeed;
+    this.targetWindDirection = preset.windDirection;
+    this.targetGustiness = preset.gustiness;
+    this.targetCurrentSpeed = preset.currentSpeed;
+    this.targetCurrentDirection = preset.currentDirection;
   }
 
   setSeaState(scale) {
@@ -114,7 +154,56 @@ export class WaveField {
     this.peakPeriod = THREE.MathUtils.lerp(
       this.peakPeriod, this.targetTp, periodEase);
     this.seaState = this.significantWaveHeight / REFERENCE_HS;
+    const windEase = 1 - Math.exp(-dt * 0.38);
+    const currentEase = 1 - Math.exp(-dt * 0.16);
+    this.windSpeed = THREE.MathUtils.lerp(
+      this.windSpeed, this.targetWindSpeed, windEase);
+    this.windDirection += angleDelta(
+      this.windDirection, this.targetWindDirection,
+    ) * windEase;
+    this.gustiness = THREE.MathUtils.lerp(
+      this.gustiness, this.targetGustiness, windEase);
+    this.currentSpeed = THREE.MathUtils.lerp(
+      this.currentSpeed, this.targetCurrentSpeed, currentEase);
+    this.currentDirection += angleDelta(
+      this.currentDirection, this.targetCurrentDirection,
+    ) * currentEase;
+    this.gustFactor = this._gustFactorAt(anchorX, anchorZ);
     this._syncSpectrum(dt, anchorX, anchorZ);
+  }
+
+  _gustFactorAt(x, z) {
+    const spatial = x * 0.0027 + z * 0.0019;
+    const gust = Math.sin(this.time * 0.43 + spatial) * 0.56
+      + Math.sin(this.time * 1.17 - spatial * 1.7 + 1.4) * 0.29
+      + Math.sin(this.time * 2.63 + spatial * 3.1 + 4.2) * 0.15;
+    return Math.max(0.52, 1 + gust * this.gustiness);
+  }
+
+  windAt(x, z, out) {
+    const spatial = x * 0.0018 - z * 0.0023;
+    const directionSway = this.gustiness * 0.16
+      * Math.sin(this.time * 0.31 + spatial + 0.8);
+    const direction = this.windDirection + directionSway;
+    const speed = this.windSpeed * this._gustFactorAt(x, z);
+    return out.set(
+      Math.cos(direction) * speed,
+      0,
+      Math.sin(direction) * speed,
+    );
+  }
+
+  currentAt(x, z, out) {
+    const spatial = x * 0.0008 + z * 0.0011;
+    const meander = Math.sin(this.time * 0.035 + spatial) * 0.1;
+    const pulse = 0.94 + 0.06 * Math.sin(this.time * 0.071 - spatial * 1.8 + 2.1);
+    const direction = this.currentDirection + meander;
+    const speed = this.currentSpeed * pulse;
+    return out.set(
+      Math.cos(direction) * speed,
+      0,
+      Math.sin(direction) * speed,
+    );
   }
 
   _syncSpectrum(dt, anchorX = 0, anchorZ = 0) {
@@ -191,7 +280,12 @@ export class WaveField {
       vz += orbital * w.dz;
       vy -= w.A * w.omega * c;
     }
-    return out.set(vx, vy, vz);
+    this.currentAt(x, z, this._currentTmp);
+    return out.set(
+      vx + this._currentTmp.x,
+      vy,
+      vz + this._currentTmp.z,
+    );
   }
 
   verticalVelocityAt(x, z) {
@@ -242,7 +336,12 @@ export class WaveField {
       nz -= w.dz * ka * c;
       ny -= w.Q * ka * si;
     }
-    velocityOut.set(vx, vy, vz);
+    this.currentAt(x, z, this._currentTmp);
+    velocityOut.set(
+      vx + this._currentTmp.x,
+      vy,
+      vz + this._currentTmp.z,
+    );
     normalOut.set(nx, ny, nz).normalize();
 
     px = x - dx;

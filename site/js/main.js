@@ -290,6 +290,14 @@ if (new URLSearchParams(location.search).has('debug')) {
   window.openWater = {
     boat, waveField, camera, ocean, effects, foamTrail, weather, audio, renderer, achievements,
     snapCamera: () => cameraController.snap(),
+    environmentState: () => ({
+      trueWindMps: boat.trueWind.length(),
+      apparentWindMps: boat.apparentWindSpeed,
+      currentMps: boat.surfaceCurrent.length(),
+      stwKn: boat.speedKn,
+      sogKn: boat.groundSpeedKn,
+      gustFactor: waveField.gustFactor,
+    }),
   };
 }
 

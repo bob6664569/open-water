@@ -62,6 +62,17 @@ function makeSpec(config) {
     dragLong,
     dragLat,
     dragVert: mass * 0.21,
+    windage: {
+      frontalArea: beam * height * (config.windage?.frontalScale ?? 0.34),
+      sideArea: length * height * (config.windage?.sideScale ?? 0.22),
+      frontCd: config.windage?.frontCd ?? 0.78,
+      sideCd: config.windage?.sideCd ?? 1.02,
+      center: v3(
+        0,
+        config.windage?.height ?? height * 0.38,
+        config.windage?.longitudinal ?? -length * 0.035,
+      ),
+    },
     latDragPos: v3(0, 0, -length * 0.08),
     rudderLift: config.rudderLift,
     planingLift,

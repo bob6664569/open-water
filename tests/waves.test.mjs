@@ -26,16 +26,58 @@ test('sea presets transition smoothly and invalid presets are ignored', () => {
   assert.equal(field.preset, 4);
   assert.equal(field.targetHs, SEA_PRESETS[4].hs);
   assert.equal(field.targetTp, SEA_PRESETS[4].tp);
+  assert.equal(field.targetWindSpeed, SEA_PRESETS[4].windSpeed);
+  assert.equal(field.targetCurrentSpeed, SEA_PRESETS[4].currentSpeed);
   field.update(1, 120, -45);
   assert.ok(field.significantWaveHeight > SEA_PRESETS[2].hs);
   assert.ok(field.significantWaveHeight < SEA_PRESETS[4].hs);
   assert.ok(field.peakPeriod > SEA_PRESETS[2].tp);
   assert.ok(field.peakPeriod < SEA_PRESETS[4].tp);
+  assert.ok(field.windSpeed > SEA_PRESETS[2].windSpeed);
+  assert.ok(field.windSpeed < SEA_PRESETS[4].windSpeed);
+  assert.ok(field.currentSpeed > SEA_PRESETS[2].currentSpeed);
+  assert.ok(field.currentSpeed < SEA_PRESETS[4].currentSpeed);
   assert.equal(field.totalSteepness, field.steepnessSum());
 
   field.setSeaPreset(99);
   assert.equal(field.preset, 4);
   assert.equal(field.targetHs, SEA_PRESETS[4].hs);
+});
+
+test('wind gusts and surface current are deterministic physical fields', () => {
+  const first = new WaveField();
+  const second = new WaveField();
+  first.setSeaPreset(4);
+  second.setSeaPreset(4);
+  first.update(3.25, 180, -72);
+  second.update(3.25, 180, -72);
+
+  const wind = first.windAt(180, -72, new THREE.Vector3());
+  const current = first.currentAt(180, -72, new THREE.Vector3());
+  assert.deepEqual(wind.toArray(), second.windAt(180, -72, new THREE.Vector3()).toArray());
+  assert.deepEqual(
+    current.toArray(), second.currentAt(180, -72, new THREE.Vector3()).toArray(),
+  );
+  assert.ok(isFiniteVector(wind));
+  assert.ok(isFiniteVector(current));
+  assert.ok(wind.length() > SEA_PRESETS[2].windSpeed);
+  assert.ok(current.length() > SEA_PRESETS[2].currentSpeed);
+  assert.ok(first.gustFactor >= 0.52);
+});
+
+test('surface current is included in water velocity queries', () => {
+  const field = new WaveField();
+  field.update(0.7, 25, -40);
+  const x = 31;
+  const z = -17;
+  const current = field.currentAt(x, z, new THREE.Vector3());
+  const combined = field.velocityAt(x, z, new THREE.Vector3());
+  const currentSpeed = field.currentSpeed;
+  field.currentSpeed = 0;
+  const orbital = field.velocityAt(x, z, new THREE.Vector3());
+  field.currentSpeed = currentSpeed;
+
+  assert.ok(combined.clone().sub(orbital).distanceTo(current) < 1e-12);
 });
 
 test('legacy sea-state inputs are clamped to the supported range', () => {

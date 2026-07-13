@@ -415,6 +415,8 @@ export class VesselAnimationRig {
     this._actuatorScale = new THREE.Vector3(1, 1, 1);
     this._clothDirection = new THREE.Vector3();
     this._clothNormal = new THREE.Vector3();
+    this._localAir = new THREE.Vector3();
+    this._flagFlow = new THREE.Vector3();
     this._rotation = new THREE.Quaternion();
 
     const config = spec.rig;
@@ -693,6 +695,7 @@ export class VesselAnimationRig {
     span.normalize();
     const down = new THREE.Vector3().fromArray(config.down).normalize();
     const wind = new THREE.Vector3().fromArray(config.wind).normalize();
+    const windSide = new THREE.Vector3().crossVectors(down, wind).normalize();
     const point = new THREE.Vector3();
     const relative = new THREE.Matrix4();
     const meshes = [];
@@ -756,6 +759,7 @@ export class VesselAnimationRig {
       attachmentStart,
       down,
       wind,
+      windSide,
       length,
       height,
       amplitude: config.amplitude ?? 1.8,
@@ -892,25 +896,34 @@ export class VesselAnimationRig {
     for (const rotator of this.rotators) {
       rotator.pivot.rotation[rotator.axis] += rotator.rate * dt;
     }
-    const seaHeight = this.flags.length
-      ? boat.wf?.significantWaveHeight ?? 0.9 : 0;
     if (this._navCfg) this._updateNavLights(boat);
     if (!this.flags.length) return;
-    const stormWind = THREE.MathUtils.smoothstep(seaHeight, 0.9, 5.2);
+    const apparentWindSpeed = Number.isFinite(boat.apparentWindSpeed)
+      ? boat.apparentWindSpeed : boat.speedKn / 1.94384;
+    if (boat.apparentWind) {
+      this._rotation.copy(boat.quat).invert();
+      this._localAir.copy(boat.apparentWind).applyQuaternion(this._rotation);
+    } else {
+      this._localAir.set(0, 0, -apparentWindSpeed);
+    }
     const flagAir = THREE.MathUtils.clamp(
-      0.28 + boat.speedKn / 30 + stormWind * 0.72, 0.28, 1.35,
+      0.16 + apparentWindSpeed / 12, 0.2, 1.35,
     );
     const windPull = THREE.MathUtils.clamp(
-      0.2 + boat.speedKn / 26 + stormWind * 0.78, 0.2, 1,
+      0.12 + apparentWindSpeed / 12, 0.12, 1,
     );
     for (const flag of this.flags) {
-      this._clothDirection.copy(flag.wind).multiplyScalar(windPull)
+      this._flagFlow.copy(flag.wind).multiplyScalar(-this._localAir.z)
+        .addScaledVector(flag.windSide, this._localAir.x);
+      if (this._flagFlow.lengthSq() < 1e-5) this._flagFlow.copy(flag.wind);
+      else this._flagFlow.normalize();
+      this._clothDirection.copy(this._flagFlow).multiplyScalar(windPull)
         .addScaledVector(flag.down, (1 - windPull) * 0.65).normalize();
       this._clothNormal.crossVectors(
         flag.span, this._clothDirection,
       ).normalize();
       const phase = this._time * flag.frequency * Math.PI * 2
-        * (0.78 + flagAir * 0.32 + stormWind * 0.55);
+        * (0.84 + flagAir * 0.52);
       for (const mesh of flag.meshes) {
         for (let i = 0; i < mesh.position.count; i++) {
           const flow = mesh.flow[i];

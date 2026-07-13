@@ -13,6 +13,7 @@ export class WeatherEffects {
     this.flashDuration = 0;
     this.nextFlash = 5 + Math.random() * 5;
     this.activeDropCount = DROP_COUNT;
+    this._wind = new THREE.Vector3();
 
     const origins = new Float32Array(DROP_COUNT * 3);
     const motion = new Float32Array(DROP_COUNT * 2);
@@ -43,7 +44,8 @@ export class WeatherEffects {
     this.rainGeometry.setDrawRange(0, 2);
     this.rainUniforms = {
       uRainTime: { value: 0 },
-      uWindOffset: { value: 0 },
+      uWindOffset: { value: new THREE.Vector2() },
+      uWindLean: { value: new THREE.Vector2() },
     };
     this.rainMaterial = new THREE.LineBasicMaterial({
       color: 0x9eafba,
@@ -62,7 +64,8 @@ export class WeatherEffects {
           attribute vec2 aMotion;
           attribute float aSeed;
           uniform float uRainTime;
-          uniform float uWindOffset;
+          uniform vec2 uWindOffset;
+          uniform vec2 uWindLean;
 
           float rainHash(vec2 value) {
             return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453);
@@ -80,15 +83,15 @@ export class WeatherEffects {
             recycled
           );
           float endpoint = position.y;
-          float x = mod(baseX + uWindOffset + 60.0, 120.0) - 60.0;
+          vec2 swept = mod(vec2(baseX, baseZ) + uWindOffset + 60.0, 120.0) - 60.0;
           vec3 transformed = vec3(
-            x - endpoint * aMotion.y * 0.42,
+            swept.x - endpoint * aMotion.y * uWindLean.x,
             rawY + cycle * 58.0 + endpoint * aMotion.y,
-            baseZ
+            swept.y - endpoint * aMotion.y * uWindLean.y
           );
         `);
     };
-    this.rainMaterial.customProgramCacheKey = () => 'gpu-rain-v1';
+    this.rainMaterial.customProgramCacheKey = () => 'gpu-rain-v2';
     this.rain = new THREE.LineSegments(this.rainGeometry, this.rainMaterial);
     this.rain.frustumCulled = false;
     this.rain.renderOrder = 8;
@@ -291,11 +294,23 @@ export class WeatherEffects {
       this.boltMaterial.opacity = 0;
       return;
     }
-    const wind = 8 + this.storm * 13;
+    if (typeof this.waveField.windAt === 'function') {
+      this.waveField.windAt(
+        this.camera.position.x, this.camera.position.z, this._wind,
+      );
+    } else {
+      this._wind.set(8 + this.storm * 13, 0, 0);
+    }
     this.rainUniforms.uRainTime.value += dt;
-    this.rainUniforms.uWindOffset.value = (
-      this.rainUniforms.uWindOffset.value + wind * dt
-    ) % 120;
+    const offset = this.rainUniforms.uWindOffset.value;
+    offset.set(
+      THREE.MathUtils.euclideanModulo(offset.x + this._wind.x * dt + 60, 120) - 60,
+      THREE.MathUtils.euclideanModulo(offset.y + this._wind.z * dt + 60, 120) - 60,
+    );
+    this.rainUniforms.uWindLean.value.set(
+      THREE.MathUtils.clamp(this._wind.x / 42, -0.72, 0.72),
+      THREE.MathUtils.clamp(this._wind.z / 42, -0.72, 0.72),
+    );
 
     if (this.storm > 0.72) {
       this.nextFlash -= dt * this.storm;

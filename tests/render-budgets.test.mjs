@@ -135,6 +135,24 @@ test('ocean budgets replace geometry only when segment counts change', () => {
   assert.equal(ocean.patch.geometry, currentPatch);
 });
 
+test('wind strengthens micro-ripples without sliding the normal map over waves', () => {
+  const ocean = new Ocean(new WaveField(), {
+    oceanFarSegments: 8,
+    oceanPatchSegments: 4,
+  });
+  const shader = {
+    uniforms: {},
+    vertexShader: '#include <common>\n#include <beginnormal_vertex>\n#include <begin_vertex>',
+    fragmentShader: '#include <common>\n#include <normal_fragment_begin>',
+  };
+
+  ocean.mesh.material.onBeforeCompile(shader);
+
+  assert.match(shader.fragmentShader, /float windSpeed = length\(uWind\.xz\)/);
+  assert.match(shader.fragmentShader, /vec2\(uTime \* 0\.011, uTime \* 0\.006\)/);
+  assert.doesNotMatch(shader.fragmentShader, /wind(?:Dir|Cross) \* uTime/);
+});
+
 test('ocean updates reuse uniforms and snap both meshes to their grids', () => {
   const waveField = new WaveField();
   const ocean = new Ocean(waveField, { oceanFarSegments: 10, oceanPatchSegments: 10 });
@@ -353,7 +371,10 @@ test('particle pools track live slots and coalesce GPU buffer uploads', () => {
 });
 
 test('weather rain runs as a budgeted GPU-instanced simulation', () => {
-  const waveField = { significantWaveHeight: 0.35 };
+  const waveField = {
+    significantWaveHeight: 0.35,
+    windAt: (_x, _z, out) => out.set(5, 0, 12),
+  };
   const weather = new WeatherEffects(
     new THREE.Scene(), new THREE.PerspectiveCamera(),
     waveField, null,
@@ -375,6 +396,7 @@ test('weather rain runs as a budgeted GPU-instanced simulation', () => {
   weather.rainMaterial.onBeforeCompile(shader);
   assert.equal(shader.uniforms.uRainTime, weather.rainUniforms.uRainTime);
   assert.equal(shader.uniforms.uWindOffset, weather.rainUniforms.uWindOffset);
+  assert.equal(shader.uniforms.uWindLean, weather.rainUniforms.uWindLean);
   assert.match(shader.vertexShader, /attribute vec3 aOrigin/);
   assert.match(shader.vertexShader, /rawY \+ cycle \* 58\.0/);
 
@@ -383,7 +405,10 @@ test('weather rain runs as a budgeted GPU-instanced simulation', () => {
     .map(([name, attribute]) => [name, attribute.version]));
   weather.update(1);
   assert.ok(weather.rainUniforms.uRainTime.value > 0);
-  assert.ok(weather.rainUniforms.uWindOffset.value > 8);
+  assert.deepEqual(weather.rainUniforms.uWindOffset.value.toArray(), [5, 12]);
+  assert.deepEqual(
+    weather.rainUniforms.uWindLean.value.toArray(), [5 / 42, 12 / 42],
+  );
   assert.deepEqual(
     Object.fromEntries(Object.entries(weather.rainGeometry.attributes)
       .map(([name, attribute]) => [name, attribute.version])),

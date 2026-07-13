@@ -5,6 +5,7 @@ import { VesselAnimationRig } from './vessel-animations.js';
 import { enableWaterPasses } from '../rendering/render-layers.js';
 
 const G = 9.81;
+const HALF_AIR_DENSITY = 0.6125;
 const DEBUG_WATER_MASK = new URLSearchParams(window.location.search).has('masks');
 
 const MODEL_TWEAK = {
@@ -157,6 +158,11 @@ export class Boat {
     this.propWet = 1;
     this.wet = 1;
     this.speedKn = 0;
+    this.groundSpeedKn = 0;
+    this.apparentWindSpeed = 0;
+    this.trueWind = new THREE.Vector3();
+    this.apparentWind = new THREE.Vector3();
+    this.surfaceCurrent = new THREE.Vector3();
     this.slam = 0;
     this.slamSpeed = 0;
     this.slamPoint = new THREE.Vector3();
@@ -180,6 +186,10 @@ export class Boat {
     this._s = Array.from({ length: 10 }, () => new THREE.Vector3());
     this._waterVel = new THREE.Vector3();
     this._relVel = new THREE.Vector3();
+    this._windVel = new THREE.Vector3();
+    this._apparentAir = new THREE.Vector3();
+    this._aeroForce = new THREE.Vector3();
+    this._aeroPoint = new THREE.Vector3();
     this._effSteer = 0;
     this._loadId = 0;
     this.visualRig = null;
@@ -376,6 +386,12 @@ export class Boat {
     this.slamSpeed = 0;
     this.slamPoint.copy(this.pos);
     this.slamNormal.set(0, 1, 0);
+    this.speedKn = 0;
+    this.groundSpeedKn = 0;
+    this.apparentWindSpeed = 0;
+    this.trueWind.set(0, 0, 0);
+    this.apparentWind.set(0, 0, 0);
+    this.surfaceCurrent.set(0, 0, 0);
     this._accum = 0;
   }
 
@@ -384,6 +400,12 @@ export class Boat {
   }
 
   update(frameDt) {
+    if (frameDt <= 0) {
+      this.group.position.copy(this.pos);
+      this.group.quaternion.copy(this.quat);
+      this.waterMask.visible = this._maskWanted && this.wet > 0;
+      return;
+    }
     const h = 1 / this.physicsHz;
     this._accum = Math.min(this._accum + frameDt, 0.05);
     this.slam = Math.max(this.slam - frameDt * 4, 0);
@@ -395,8 +417,6 @@ export class Boat {
       steps++;
     }
     if (steps === this.physicsMaxSteps) this._accum = Math.min(this._accum, h);
-    if (this.visualRig) this.visualRig.update(frameDt, this);
-
     const upY = this._up.set(0, 1, 0).applyQuaternion(this.quat).y;
     this._invTime = upY < 0.15 ? (this._invTime || 0) + frameDt : 0;
     if (this._invTime > 2.5) {
@@ -413,6 +433,22 @@ export class Boat {
     this.wf.velocityAt(this.pos.x, this.pos.z, this._waterVel);
     this._relVel.copy(this.vel).sub(this._waterVel);
     this.speedKn = Math.hypot(this._relVel.x, this._relVel.z) * 1.94384;
+    this.groundSpeedKn = Math.hypot(this.vel.x, this.vel.z) * 1.94384;
+    if (typeof this.wf.currentAt === 'function') {
+      this.wf.currentAt(this.pos.x, this.pos.z, this.surfaceCurrent);
+    } else {
+      this.surfaceCurrent.set(0, 0, 0);
+    }
+    if (typeof this.wf.windAt === 'function') {
+      this.wf.windAt(this.pos.x, this.pos.z, this.trueWind);
+    } else {
+      this.trueWind.set(0, 0, 0);
+    }
+    this.apparentWind.copy(this.trueWind).sub(this.vel);
+    this.apparentWindSpeed = Math.hypot(
+      this.apparentWind.x, this.apparentWind.z,
+    );
+    if (this.visualRig) this.visualRig.update(frameDt, this);
   }
 
   _step(h) {
@@ -431,6 +467,27 @@ export class Boat {
     const vLong = relCenter.dot(fwd);
     const vLat = relCenter.dot(right);
     const vVert = relCenter.dot(up);
+
+    if (typeof this.wf.windAt === 'function' && S.windage) {
+      this.wf.windAt(this.pos.x, this.pos.z, this._windVel);
+      this._apparentAir.copy(this._windVel).sub(this.vel);
+      const airLong = this._apparentAir.dot(fwd);
+      const airLat = this._apparentAir.dot(right);
+      const windage = S.windage;
+      this._aeroForce.copy(fwd).multiplyScalar(
+        HALF_AIR_DENSITY * windage.frontCd * windage.frontalArea
+        * airLong * Math.abs(airLong),
+      ).addScaledVector(
+        right,
+        HALF_AIR_DENSITY * windage.sideCd * windage.sideArea
+        * airLat * Math.abs(airLat),
+      );
+      F.add(this._aeroForce);
+      this.worldPoint(windage.center, this._aeroPoint);
+      tauW.add(s[2].crossVectors(
+        this._aeroPoint.sub(this.pos), this._aeroForce,
+      ));
+    }
 
     let wet = 0;
     const combinedSample = typeof this.wf.sampleSurface === 'function';

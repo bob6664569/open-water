@@ -124,15 +124,20 @@ in `localStorage`: no account, no network calls.
 - **Ocean**: deterministic JONSWAP spectrum of 16 Gerstner waves, normalized to
   significant wave height `Hs` and peak period `Tp`, with their own phases and a
   secondary cross swell. Shared CPU/GPU computation, smoothed weather
-  transitions, noise micro-ripples, procedural crest foam, normal flattening plus
-  rising roughness with distance (specular anti-aliasing). PBR material extended
-  via `onBeforeCompile`, lit by a prefiltered HDR environment map.
+  transitions, deterministic spatial gusts and a slowly meandering surface
+  current. Wind-driven noise micro-ripples, procedural crest foam, normal
+  flattening plus rising roughness with distance (specular anti-aliasing). PBR
+  material extended via `onBeforeCompile`, lit by a prefiltered HDR environment
+  map.
 - **Boat**: 6-DOF rigid body at a fixed step (240 Hz). Each model has its own
   physics sheet (mass, inertias, dimensions, propulsion, cameras, and effect
   anchors). Buoyancy over 8 hull points sampling the real wave (height, normal,
   and 3D orbital velocity), vectored thrust at the transom (cut when the
   propeller ventilates), drag computed relative to the water, planing lift with a
   moving center of pressure, heel in turns, and hydrodynamic roll restoring.
+  Surface current is included in every relative-water velocity sample; apparent
+  wind applies vessel-scaled aerodynamic drag above the center of gravity, so
+  crosswind produces both leeway and heel.
 - **Effects**: hull spray spread across the physical contacts of the front third,
   transom turbulence and jets emitted from each real propeller (per-droplet
   size/alpha, fading on water contact), mist, turn spray thrown off the outer
