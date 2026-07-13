@@ -771,12 +771,21 @@ export class VesselAnimationRig {
   }
 
   getPropellerWorldPositions(target = []) {
-    target.length = 0;
+    let count = 0;
     for (const propeller of this.propellers) {
       propeller.pivot.getWorldPosition(this._point);
-      if (target.some(p => p.distanceToSquared(this._point) < 0.01)) continue;
-      target.push(this._point.clone());
+      let duplicate = false;
+      for (let i = 0; i < count; i++) {
+        if (target[i].distanceToSquared(this._point) < 0.01) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (duplicate) continue;
+      target[count] ||= new THREE.Vector3();
+      target[count++].copy(this._point);
     }
+    target.length = count;
     return target;
   }
 

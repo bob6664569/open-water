@@ -266,6 +266,10 @@ export class Seabed {
     this.reefItems = [];
     this.reefMeshes = [];
     this._reefDummy = new THREE.Object3D();
+    this._reefColor = new THREE.Color();
+    this._reefBuddyPool = [];
+    this._starBuddyPool = [];
+    this._dirtyReefMeshes = new Set();
     this._buildReef();
     this.setPerformanceBudget({ id: IS_CONSTRAINED_DEVICE ? 'low' : 'high' });
   }
@@ -331,9 +335,13 @@ export class Seabed {
 
   _reefBuddy(self, cx, cz, rmin, rmax) {
     const lo = Math.max(0, rmin - 5) ** 2, hi = (rmax + 8) ** 2;
-    const pool = this.reefItems.filter(o => o !== self && o.placed
-      && (o.x - cx) ** 2 + (o.z - cz) ** 2 >= lo
-      && (o.x - cx) ** 2 + (o.z - cz) ** 2 <= hi);
+    const pool = this._reefBuddyPool;
+    pool.length = 0;
+    for (const candidate of this.reefItems) {
+      const distanceSq = (candidate.x - cx) ** 2 + (candidate.z - cz) ** 2;
+      if (candidate !== self && candidate.placed
+          && distanceSq >= lo && distanceSq <= hi) pool.push(candidate);
+    }
     return pool.length ? pool[(Math.random() * pool.length) | 0] : null;
   }
 
@@ -390,29 +398,29 @@ export class Seabed {
     if (item.kind === 'branch') {
       const s = rand(0.5, 1.2);
       dummy.scale.set(s * rand(0.8, 1.1), s * rand(0.8, 1.35), s * rand(0.8, 1.1));
-      item.mesh.setColorAt(item.index, new THREE.Color(
+      item.mesh.setColorAt(item.index, this._reefColor.setHex(
         [0xff8b70, 0xf27ba2, 0xffae67, 0xd98bd0][(Math.random() * 4) | 0]));
     } else if (item.kind === 'fan') {
       const s = rand(0.55, 1.2);
       dummy.scale.set(s * rand(0.8, 1.25), s * rand(0.85, 1.3), s * rand(0.75, 1.15));
-      item.mesh.setColorAt(item.index, new THREE.Color(
+      item.mesh.setColorAt(item.index, this._reefColor.setHex(
         [0xffb66f, 0xff858c, 0xc899ee, 0xf19fbd][(Math.random() * 4) | 0]));
     } else if (item.kind === 'tube') {
       const s = rand(0.6, 1.3);
       dummy.scale.set(s * rand(0.85, 1.2), s * rand(0.8, 1.25), s * rand(0.85, 1.2));
-      item.mesh.setColorAt(item.index, new THREE.Color(
+      item.mesh.setColorAt(item.index, this._reefColor.setHex(
         [0xf0cf7d, 0xb8d47d, 0xe8a6ce, 0xe3b78c][(Math.random() * 4) | 0]));
     } else if (item.kind === 'mound') {
       const s = rand(0.55, 1.35);
       dummy.scale.set(s * rand(0.8, 1.35), s * rand(0.6, 1.0), s * rand(0.8, 1.35));
-      item.mesh.setColorAt(item.index, new THREE.Color(
+      item.mesh.setColorAt(item.index, this._reefColor.setHex(
         [0xe3b46f, 0xd49b7c, 0xe4a3a0, 0xc6ad79][(Math.random() * 4) | 0]));
     } else if (item.kind === 'rock') {
       const s = rand(0.28, 1.18);
       dummy.position.y = SAND_Y - rand(0.08, 0.3) * s;
       dummy.rotation.set(rand(-0.35, 0.35), rand(0, Math.PI * 2), rand(-0.35, 0.35));
       dummy.scale.set(s * rand(0.75, 1.7), s * rand(0.45, 0.95), s * rand(0.75, 1.55));
-      item.mesh.setColorAt(item.index, new THREE.Color(
+      item.mesh.setColorAt(item.index, this._reefColor.setHex(
         [
           0x77746c,
           0x59646a,
@@ -426,7 +434,7 @@ export class Seabed {
       const s = rand(0.75, 1.3);
       dummy.rotation.x = dummy.rotation.z = 0;
       dummy.scale.set(s * rand(0.8, 1.3), rand(0.75, 1.55), s * rand(0.8, 1.3));
-      item.mesh.setColorAt(item.index, new THREE.Color(
+      item.mesh.setColorAt(item.index, this._reefColor.setHex(
         [0x54ad7c, 0x79b35f, 0x43aaa0, 0x8bad58][(Math.random() * 4) | 0]));
     }
     dummy.updateMatrix();
@@ -507,9 +515,14 @@ export class Seabed {
 
   _buddy(self, cx, cz, rmin, rmax) {
     const lo = (rmin - 3) ** 2, hi = (rmax + 7) ** 2;
-    const pool = this.stars.filter(o => o !== self && o.placed
-      && ((o.m.position.x - cx) ** 2 + (o.m.position.z - cz) ** 2) >= lo
-      && ((o.m.position.x - cx) ** 2 + (o.m.position.z - cz) ** 2) <= hi);
+    const pool = this._starBuddyPool;
+    pool.length = 0;
+    for (const candidate of this.stars) {
+      const distanceSq = (candidate.m.position.x - cx) ** 2
+        + (candidate.m.position.z - cz) ** 2;
+      if (candidate !== self && candidate.placed
+          && distanceSq >= lo && distanceSq <= hi) pool.push(candidate);
+    }
     return pool.length ? pool[(Math.random() * pool.length) | 0] : null;
   }
 
@@ -580,7 +593,8 @@ export class Seabed {
       if (dx * dx + dz * dz > STAR_RECYCLE * STAR_RECYCLE) this._placeStar(st, c.x, c.z, true);
     }
 
-    const dirty = new Set();
+    const dirty = this._dirtyReefMeshes;
+    dirty.clear();
     for (const item of this.reefItems) {
       const dx = item.x - c.x, dz = item.z - c.z;
       if (dx * dx + dz * dz <= REEF_RECYCLE * REEF_RECYCLE) continue;

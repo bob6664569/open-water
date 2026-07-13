@@ -67,12 +67,14 @@ const [
   { WeatherEffects },
   { Seabed },
   { FoamTrail },
+  { VesselAnimationRig },
 ] = await Promise.all([
   import('../site/js/ocean.js'),
   import('../site/js/effects.js'),
   import('../site/js/weather.js'),
   import('../site/js/seabed.js'),
   import('../site/js/foamtrail.js'),
+  import('../site/js/vessel-animations.js'),
 ]);
 
 test('streamed water-normal generation stays bit-identical', () => {
@@ -249,6 +251,56 @@ test('seabed quality profiles change instance counts without rebuilding meshes',
   seabed.setPerformanceBudget({ id: 'ultra' });
   assert.deepEqual(seabed.reefMeshes.map(mesh => mesh.count), [22, 16, 17, 14, 96, 170]);
   assert.deepEqual(seabed.reefMeshes, meshes);
+});
+
+test('seabed updates reuse their recycling scratch collections', () => {
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera();
+  const boat = { pos: new THREE.Vector3(), vel: new THREE.Vector3() };
+  const seabed = new Seabed(scene, camera, { preset: 1 }, boat);
+  const dirtyMeshes = seabed._dirtyReefMeshes;
+  const reefPool = seabed._reefBuddyPool;
+  const starPool = seabed._starBuddyPool;
+
+  seabed.update(1 / 60);
+  seabed.update(1 / 60);
+
+  assert.equal(seabed._dirtyReefMeshes, dirtyMeshes);
+  assert.equal(seabed._reefBuddyPool, reefPool);
+  assert.equal(seabed._starBuddyPool, starPool);
+});
+
+test('vessel rigs reuse propeller world-position vectors', () => {
+  const model = new THREE.Group();
+  for (const [name, x] of [['left-prop', -1], ['right-prop', 1]]) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.2, 0.2),
+      new THREE.MeshBasicMaterial(),
+    );
+    mesh.name = name;
+    mesh.position.x = x;
+    model.add(mesh);
+  }
+  const rig = new VesselAnimationRig(model, {
+    rig: {
+      nodePropellers: [
+        { node: 'left-prop' },
+        { node: 'right-prop' },
+      ],
+    },
+  });
+  model.updateMatrixWorld(true);
+  const target = rig.getPropellerWorldPositions([]);
+  const references = [...target];
+  const firstPositions = target.map(position => position.clone());
+
+  model.position.x = 5;
+  model.updateMatrixWorld(true);
+  const reused = rig.getPropellerWorldPositions(target);
+
+  assert.equal(reused, target);
+  assert.ok(reused.every((position, i) => position === references[i]));
+  assert.ok(reused.every((position, i) => position.x === firstPositions[i].x + 5));
 });
 
 test('foam trail batches every active splat into one instanced draw', () => {
