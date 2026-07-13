@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { loadGLTFDeferred } from './deferred-loader.js';
+import { loadGLTFDeferred } from '../runtime/deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
-import { showInRefraction } from './render-layers.js';
+import { showInRefraction } from '../rendering/render-layers.js';
 import { sampleBoatThreat } from './fauna-math.js';
 
 // The rig faces -Z even though its extended flippers make X the longest bound.

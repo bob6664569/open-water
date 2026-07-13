@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FaunaManager } from '../site/js/fauna-manager.js';
+import { FaunaManager } from '../site/js/fauna/fauna-manager.js';
 
 function fakeType(name, events) {
   return class {

@@ -79,7 +79,7 @@ sound-effect file.
 
 ## Other visual material
 
-The Bitcoin symbol paths in `site/js/vessel-animations.js` are adapted from
+The Bitcoin symbol paths in `site/js/simulation/vessel-animations.js` are adapted from
 [Bitcoin.svg](https://commons.wikimedia.org/wiki/File:Bitcoin.svg). Wikimedia
 Commons identifies the simple geometry as public domain while noting that the
 symbol may still be protected as a trademark in some jurisdictions.

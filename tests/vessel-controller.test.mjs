@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { VesselController } from '../site/js/vessel-controller.js';
+import { VesselController } from '../site/js/controllers/vessel-controller.js';
 
 function createElement() {
   const classes = new Set();

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadGLTFDeferred } from './deferred-loader.js';
+import { loadGLTFDeferred } from '../runtime/deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
 // Ambient gulls blend flap and glide clips, with a procedural fallback on load failure.

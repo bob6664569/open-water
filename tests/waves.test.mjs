@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { SEA_PRESETS, WaveField } from '../site/js/waves.js';
+import { SEA_PRESETS, WaveField } from '../site/js/simulation/waves.js';
 
 const isFiniteVector = vector => [vector.x, vector.y, vector.z].every(Number.isFinite);
 

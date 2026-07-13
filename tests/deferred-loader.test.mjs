@@ -21,7 +21,7 @@ after(() => {
   });
 });
 
-const { createDeferredGLTFLoader } = await import('../site/js/deferred-loader.js');
+const { createDeferredGLTFLoader } = await import('../site/js/runtime/deferred-loader.js');
 
 function createControllableLoader() {
   const requests = [];

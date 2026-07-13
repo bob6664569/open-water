@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import * as THREE from 'three';
-import { WaveField } from '../site/js/waves.js';
+import { WaveField } from '../site/js/simulation/waves.js';
 import { compareBenchmarks, summarizeBenchmark } from './benchmark-core.mjs';
 
 const args = process.argv.slice(2);

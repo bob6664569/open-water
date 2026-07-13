@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { loadGLTFDeferred } from './deferred-loader.js';
+import { loadGLTFDeferred } from '../runtime/deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
-import { enableWaterPasses } from './render-layers.js';
+import { enableWaterPasses } from '../rendering/render-layers.js';
 
 // Rough-sea escorts arrive only after sustained cruising and remain below local waves.
 const rand = (a, b) => a + Math.random() * (b - a);

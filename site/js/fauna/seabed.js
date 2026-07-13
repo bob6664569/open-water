@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { IS_CONSTRAINED_DEVICE, loadGLTFDeferred } from './deferred-loader.js';
-import { showInRefraction } from './render-layers.js';
+import { IS_CONSTRAINED_DEVICE, loadGLTFDeferred } from '../runtime/deferred-loader.js';
+import { showInRefraction } from '../rendering/render-layers.js';
 
 // The calm-water seabed follows the boat and fades radially before the deep ocean.
 const CALM_PRESET = 1;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadGLTFDeferred } from './deferred-loader.js';
+import { loadGLTFDeferred } from '../runtime/deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
 // Calm-weather macaws use their GLB wing animation and a separate parrot audio bus.

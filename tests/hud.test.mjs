@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { BoatHud } from '../site/js/hud.js';
+import { BoatHud } from '../site/js/ui/hud.js';
 
 function fakeElement() {
   const writes = [];

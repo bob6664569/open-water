@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
-import { SEA_PRESETS } from './waves.js';
+import { SEA_PRESETS } from '../simulation/waves.js';
 
 const SUN_START_OFFSET = THREE.MathUtils.degToRad(12);
 const CLEAR_FOG = 0x9cbfd8;

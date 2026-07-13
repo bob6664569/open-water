@@ -1,4 +1,4 @@
-import { getVesselSpec } from './vessels.js';
+import { getVesselSpec } from '../simulation/vessels.js';
 
 const REWARD_VESSELS = [
   { file: /^boat\.glb$/i, reward: 'racer' },

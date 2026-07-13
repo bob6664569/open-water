@@ -10,9 +10,8 @@ const SITE = resolve(ROOT, 'site');
 const JS_DIR = resolve(SITE, 'js');
 
 function firstPartyModules() {
-  return readdirSync(JS_DIR)
+  return filesUnder(JS_DIR)
     .filter(file => extname(file) === '.js')
-    .map(file => resolve(JS_DIR, file))
     .sort();
 }
 
@@ -254,8 +253,8 @@ test('optional fauna and seabed models use the constrained-device decode queue',
   const violations = [];
 
   for (const name of deferredModules) {
-    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
-    if (!source.includes("from './deferred-loader.js'")) {
+    const source = readFileSync(resolve(JS_DIR, 'fauna', name), 'utf8');
+    if (!source.includes("from '../runtime/deferred-loader.js'")) {
       violations.push(`${name}: deferred loader import missing`);
     }
     if (!source.includes('loadGLTFDeferred(')) {
@@ -271,7 +270,7 @@ test('optional fauna and seabed models use the constrained-device decode queue',
 
 test('fauna frame loops reuse species metadata without filter allocations', () => {
   for (const name of ['birds.js', 'fish.js']) {
-    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    const source = readFileSync(resolve(JS_DIR, 'fauna', name), 'utf8');
     assert.equal(
       source.match(/Object\.keys\(SPECIES\)/g)?.length,
       1,
@@ -290,12 +289,12 @@ test('fauna frame loops avoid temporary threat objects and square-root distance 
     'birds.js', 'dolphins.js', 'fish.js', 'manta.js',
     'turtles.js', 'whale.js', 'wildlife.js',
   ]) {
-    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    const source = readFileSync(resolve(JS_DIR, 'fauna', name), 'utf8');
     assert.doesNotMatch(source, /_v\.length\(\)|\.distanceTo\(/, name);
   }
 
   for (const name of ['fish.js', 'manta.js', 'turtles.js']) {
-    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    const source = readFileSync(resolve(JS_DIR, 'fauna', name), 'utf8');
     assert.doesNotMatch(source, /return \{ ax:/, `${name} allocates a threat result`);
     assert.match(source, /sampleBoatThreat\(/, `${name} must use the shared threat sampler`);
   }

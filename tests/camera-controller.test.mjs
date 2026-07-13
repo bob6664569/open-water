@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { CameraController } from '../site/js/camera-controller.js';
+import { CameraController } from '../site/js/controllers/camera-controller.js';
 
 function createFixture({ storedMode = null, isTouch = false, reducedMotion = false } = {}) {
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 4000);

@@ -7,7 +7,7 @@ import {
   REFRACTION_LAYER,
   enableWaterPasses,
   showInRefraction,
-} from '../site/js/render-layers.js';
+} from '../site/js/rendering/render-layers.js';
 
 test('water-pass layers keep vessels reflected and underwater content refracted', () => {
   assert.notEqual(REFLECTION_LAYER, REFRACTION_LAYER);

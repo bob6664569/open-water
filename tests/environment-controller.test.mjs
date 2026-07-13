@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   analyzeHdrTexture,
   EnvironmentController,
-} from '../site/js/environment-controller.js';
+} from '../site/js/rendering/environment-controller.js';
 
 function createHdrTexture() {
   const width = 8;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sampleBoatThreat } from '../site/js/fauna-math.js';
+import { sampleBoatThreat } from '../site/js/fauna/fauna-math.js';
 
 test('boat threat sampling leaves its output untouched outside the radius', () => {
   const output = { ax: 7, az: 8, u: 9 };

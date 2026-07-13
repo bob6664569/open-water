@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadGLTFDeferred } from './deferred-loader.js';
+import { loadGLTFDeferred } from '../runtime/deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 
 // Storm encounters combine a skinned whale with wave-conforming contact foam and spray.

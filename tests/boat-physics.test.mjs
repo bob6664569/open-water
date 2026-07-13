@@ -28,7 +28,7 @@ if (!ISOLATED) {
   });
 } else {
   const THREE = await import('three');
-  const { VESSEL_SPECS } = await import('../site/js/vessels.js');
+  const { VESSEL_SPECS } = await import('../site/js/simulation/vessels.js');
 
 Object.defineProperties(globalThis, {
   window: {
@@ -41,7 +41,7 @@ Object.defineProperties(globalThis, {
   },
 });
 
-const { Boat } = await import('../site/js/boat.js');
+const { Boat } = await import('../site/js/simulation/boat.js');
 
 function flatWater() {
   return {

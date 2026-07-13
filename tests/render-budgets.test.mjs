@@ -29,7 +29,7 @@ if (!ISOLATED) {
   });
 } else {
   const THREE = await import('three');
-  const { WaveField } = await import('../site/js/waves.js');
+  const { WaveField } = await import('../site/js/simulation/waves.js');
 
 function canvasContext() {
   return {
@@ -69,12 +69,12 @@ const [
   { FoamTrail },
   { VesselAnimationRig },
 ] = await Promise.all([
-  import('../site/js/ocean.js'),
-  import('../site/js/effects.js'),
-  import('../site/js/weather.js'),
-  import('../site/js/seabed.js'),
-  import('../site/js/foamtrail.js'),
-  import('../site/js/vessel-animations.js'),
+  import('../site/js/rendering/ocean.js'),
+  import('../site/js/rendering/effects.js'),
+  import('../site/js/rendering/weather.js'),
+  import('../site/js/fauna/seabed.js'),
+  import('../site/js/rendering/foamtrail.js'),
+  import('../site/js/simulation/vessel-animations.js'),
 ]);
 
 test('streamed water-normal generation stays bit-identical', () => {

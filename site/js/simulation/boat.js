@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VESSEL_SPECS } from './vessels.js';
 import { VesselAnimationRig } from './vessel-animations.js';
-import { enableWaterPasses } from './render-layers.js';
+import { enableWaterPasses } from '../rendering/render-layers.js';
 
 const G = 9.81;
 const DEBUG_WATER_MASK = new URLSearchParams(window.location.search).has('masks');

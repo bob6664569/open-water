@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { getVesselSpec, VESSEL_SPECS } from '../site/js/vessels.js';
+import { getVesselSpec, VESSEL_SPECS } from '../site/js/simulation/vessels.js';
 
 test('every indexed boat resolves to its own vessel specification', () => {
   const entries = JSON.parse(readFileSync(

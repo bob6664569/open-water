@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DriveController } from '../site/js/drive-controller.js';
+import { DriveController } from '../site/js/controllers/drive-controller.js';
 
 function createBoat() {
   return {

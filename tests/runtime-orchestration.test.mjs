@@ -6,11 +6,11 @@ const mainSource = await readFile(new URL('../site/js/main.js', import.meta.url)
 
 test('main delegates driving, cameras and water passes to focused runtime controllers', () => {
   for (const contract of [
-    "import { DriveController } from './drive-controller.js';",
-    "import { CameraController } from './camera-controller.js';",
-    "import { WaterPassRenderer } from './water-pass-renderer.js';",
-    "import { EnvironmentController } from './environment-controller.js';",
-    "import { VesselController } from './vessel-controller.js';",
+    "import { DriveController } from './controllers/drive-controller.js';",
+    "import { CameraController } from './controllers/camera-controller.js';",
+    "import { WaterPassRenderer } from './rendering/water-pass-renderer.js';",
+    "import { EnvironmentController } from './rendering/environment-controller.js';",
+    "import { VesselController } from './controllers/vessel-controller.js';",
     'const drive = new DriveController(',
     'const cameraController = new CameraController(',
     'const waterPasses = new WaterPassRenderer(',

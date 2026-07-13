@@ -5,7 +5,7 @@ import {
   ACHIEVEMENTS,
   AchievementManager,
   KONAMI_CODE,
-} from '../site/js/achievements.js';
+} from '../site/js/ui/achievements.js';
 
 function installBrowserStubs(search = '') {
   const storage = new Map();
@@ -196,7 +196,7 @@ test('air-time achievements use the sum of separate qualifying flights', () => {
 
 test('manual quality mode is selected, persisted and reported', async () => {
   const storage = installBrowserStubs('?quality=medium');
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const changes = [];
   const manager = new PerformanceManager(rendererStub(), { onChange: quality => changes.push(quality) });
 
@@ -215,7 +215,7 @@ test('manual quality mode is selected, persisted and reported', async () => {
 
 test('adaptive quality lowers render scale under sustained overload', async () => {
   installBrowserStubs();
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const changes = [];
   const manager = new PerformanceManager(rendererStub(), { onChange: quality => changes.push(quality) });
   manager.auto = true;
@@ -237,7 +237,7 @@ test('adaptive quality lowers render scale under sustained overload', async () =
 
 test('frame sampling rejects long pauses and caps its rolling window', async () => {
   installBrowserStubs('?quality=low');
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const manager = new PerformanceManager(rendererStub());
   manager.beginFrame(0);
   manager.beginFrame(300);
@@ -249,7 +249,7 @@ test('frame sampling rejects long pauses and caps its rolling window', async () 
 
 test('quality profiles scale expensive budgets monotonically', async () => {
   installBrowserStubs();
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const manager = new PerformanceManager(rendererStub());
   const profiles = ['low', 'medium', 'high', 'ultra'].map(id => {
     manager.setMode(id);
@@ -276,7 +276,7 @@ test('quality profiles scale expensive budgets monotonically', async () => {
 
 test('quality snapshots cannot mutate the manager profile', async () => {
   installBrowserStubs('?quality=high');
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const manager = new PerformanceManager(rendererStub());
   const snapshot = manager.quality;
   snapshot.shadowSize = 1;
@@ -288,7 +288,7 @@ test('quality snapshots cannot mutate the manager profile', async () => {
 
 test('adaptive quality drops a tier only after reaching the profile scale floor', async () => {
   installBrowserStubs();
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const changes = [];
   const manager = new PerformanceManager(rendererStub(), { onChange: quality => changes.push(quality) });
   manager.auto = true;
@@ -309,7 +309,7 @@ test('adaptive quality drops a tier only after reaching the profile scale floor'
 
 test('adaptive recovery respects cooldown before increasing render scale', async () => {
   installBrowserStubs();
-  const { PerformanceManager } = await import('../site/js/performance.js');
+  const { PerformanceManager } = await import('../site/js/runtime/performance.js');
   const changes = [];
   const manager = new PerformanceManager(rendererStub(), { onChange: quality => changes.push(quality) });
   manager.auto = true;

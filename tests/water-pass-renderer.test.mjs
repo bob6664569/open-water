@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as THREE from 'three';
-import { WaterPassRenderer } from '../site/js/water-pass-renderer.js';
-import { REFLECTION_LAYER, REFRACTION_LAYER } from '../site/js/render-layers.js';
+import { WaterPassRenderer } from '../site/js/rendering/water-pass-renderer.js';
+import { REFLECTION_LAYER, REFRACTION_LAYER } from '../site/js/rendering/render-layers.js';
 
 function createFixture() {
   const events = [];
