@@ -46,6 +46,10 @@ const SPECS = {
     id: 'ss_minnow_iii', label: 'Minnow', length: 14, rideHeight: 0.2,
     camera: { chaseDistance: 18 },
   },
+  'smolbot.glb': {
+    id: 'smolbot', label: 'Smolbot', length: 6, rideHeight: 0.15,
+    camera: { chaseDistance: 11 },
+  },
 };
 
 function createFixture({
@@ -154,12 +158,23 @@ test('mobile startup avoids restoring a heavy vessel and selects the safe defaul
   fixture.controller.bind();
   await fixture.controller.loadCatalog();
 
-  assert.deepEqual(fixture.controller.names, ['motoryacht_20r.glb', 'zefiro_6.5.glb']);
-  assert.equal(fixture.controller.index, 1);
+  assert.deepEqual(fixture.controller.names,
+    ['motoryacht_20r.glb', 'smolbot.glb', 'zefiro_6.5.glb']);
+  assert.equal(fixture.controller.index, 2);
   assert.equal(fixture.modelCalls[0][0], './assets/boats/zefiro_6.5.glb');
   assert.equal(fixture.elements.unlockHint.textContent, 'Tap to take the helm');
   assert.equal(fixture.elements.selector.inert, false);
   assert.equal(fixture.readyCount, 1);
+});
+
+test('a fresh profile always starts with Smolbot', async () => {
+  const fixture = createFixture({ unlocked: [], storedBoat: null });
+  await fixture.controller.loadCatalog();
+
+  assert.deepEqual(fixture.controller.names, ['smolbot.glb']);
+  assert.equal(fixture.controller.index, 0);
+  assert.equal(fixture.modelCalls[0][0], './assets/boats/smolbot.glb');
+  assert.equal(fixture.boat.spec.id, 'smolbot');
 });
 
 test('vessel changes wrap indexes and restore the active navigation state', async () => {
@@ -171,9 +186,9 @@ test('vessel changes wrap indexes and restore the active navigation state', asyn
   fixture.boat.quat.setFromEuler(new THREE.Euler(0.2, 0.4, 0.1));
   const expectedQuat = fixture.boat.quat.toArray();
 
-  await fixture.controller.loadByIndex(-2);
+  await fixture.controller.loadByIndex(-3);
   assert.equal(fixture.controller.index, 0);
-  assert.deepEqual(fixture.boat.pos.toArray(), [10, 3.3, -4]);
+  assert.deepEqual(fixture.boat.pos.toArray(), [10, 3.25, -4]);
   assert.deepEqual(fixture.boat.vel.toArray(), [7, 0.5, 2]);
   assert.deepEqual(fixture.boat.angVelB.toArray(), [0.2, 0.3, 0.4]);
   assert.deepEqual(fixture.boat.quat.toArray(), expectedQuat);
@@ -188,7 +203,7 @@ test('vessel changes wrap indexes and restore the active navigation state', asyn
 });
 
 test('reward unlocks refresh access, reveal the dock and announce the new vessel', async () => {
-  const fixture = createFixture({ unlocked: ['azure'], appStarted: true });
+  const fixture = createFixture({ unlocked: [], appStarted: true });
   fixture.controller.bind();
   await fixture.controller.loadCatalog();
   assert.equal(fixture.controller.selectionUnlocked(), false);
@@ -235,5 +250,5 @@ test('bound pointer gestures change vessels only for a deliberate horizontal swi
   });
   await Promise.resolve();
   assert.equal(fixture.elements.selector.captures[0], 3);
-  assert.equal(fixture.controller.index, 0);
+  assert.equal(fixture.controller.index, 2);
 });

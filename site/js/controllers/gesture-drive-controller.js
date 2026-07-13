@@ -1,3 +1,5 @@
+import { cancelTimeout, scheduleTimeout } from '../runtime/browser-platform.js';
+
 const DRIVE_RADIUS = 76;
 const DRIVE_DEADZONE = 0.09;
 const TUTORIAL_DISMISS_DISTANCE = 14;
@@ -16,8 +18,8 @@ export class GestureDriveController {
     onEngage = () => {},
     navigator = globalThis.navigator,
     eventTarget = globalThis,
-    setTimer = globalThis.setTimeout,
-    clearTimer = globalThis.clearTimeout,
+    setTimer = scheduleTimeout,
+    clearTimer = cancelTimeout,
     radius = DRIVE_RADIUS,
     deadzone = DRIVE_DEADZONE,
     tutorialDismissDistance = TUTORIAL_DISMISS_DISTANCE,

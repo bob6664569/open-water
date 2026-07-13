@@ -1,3 +1,5 @@
+import { requestNextFrame } from './browser-platform.js';
+
 const PERFORMANCE_HUD_INTERVAL = 250;
 
 export class QualityController {
@@ -15,7 +17,7 @@ export class QualityController {
     document = globalThis.document,
     location = globalThis.location,
     history = globalThis.history,
-    requestFrame = globalThis.requestAnimationFrame ?? (callback => callback()),
+    requestFrame = requestNextFrame,
     viewportWidth = () => globalThis.innerWidth,
     viewportHeight = () => globalThis.innerHeight,
     devicePixelRatio = () => globalThis.devicePixelRatio,

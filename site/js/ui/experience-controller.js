@@ -1,3 +1,5 @@
+import { cancelTimeout, scheduleTimeout } from '../runtime/browser-platform.js';
+
 const HELP_VISIBLE_DURATION = 20_000;
 const DOCK_REVEAL_DELAY = 4_000;
 const CONTROLS_REVEAL_DELAY = DOCK_REVEAL_DELAY + 3_000;
@@ -20,8 +22,8 @@ export class ExperienceController {
     elements = {},
     body = globalThis.document?.body,
     eventTarget = globalThis,
-    setTimer = globalThis.setTimeout,
-    clearTimer = globalThis.clearTimeout,
+    setTimer = scheduleTimeout,
+    clearTimer = cancelTimeout,
   }) {
     this.achievements = achievements;
     this.performanceManager = performanceManager;

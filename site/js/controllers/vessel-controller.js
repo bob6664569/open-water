@@ -1,4 +1,9 @@
 import { getVesselSpec } from '../simulation/vessels.js';
+import {
+  cancelTimeout,
+  fetchResource,
+  scheduleTimeout,
+} from '../runtime/browser-platform.js';
 
 const REWARD_VESSELS = [
   { file: /^boat\.glb$/i, reward: 'racer' },
@@ -24,13 +29,13 @@ export class VesselController {
     body,
     isTouch = false,
     storage = globalThis.localStorage,
-    fetcher = globalThis.fetch,
+    fetcher = fetchResource,
     getSpec = getVesselSpec,
     isAppStarted = () => false,
     onInitialReady = () => {},
     revealDock = () => {},
-    setTimer = globalThis.setTimeout,
-    clearTimer = globalThis.clearTimeout,
+    setTimer = scheduleTimeout,
+    clearTimer = cancelTimeout,
   }) {
     this.boat = boat;
     this.achievements = achievements;
@@ -113,13 +118,19 @@ export class VesselController {
     this.names = this.availableNames();
     const saved = this._storedBoatName();
     const unsafeMobileStartup = this.isTouch && MOBILE_UNSAFE_STARTUP.test(saved || '');
-    const savedIndex = unsafeMobileStartup ? -1 : this.names.indexOf(saved);
+    const savedIndex = this.names.indexOf(saved);
     const safeDefaultIndex = this.names.findIndex(name => /zefiro/i.test(name));
+    const freshDefaultIndex = this.names.findIndex(name => /smolbot/i.test(name));
+    const freshFallbackIndex = freshDefaultIndex >= 0
+      ? freshDefaultIndex
+      : Math.max(safeDefaultIndex, 0);
+    const initialIndex = !saved
+      ? freshFallbackIndex
+      : unsafeMobileStartup
+        ? Math.max(safeDefaultIndex, freshFallbackIndex)
+        : savedIndex >= 0 ? savedIndex : freshFallbackIndex;
     if (this.names.length) {
-      await this.loadByIndex(
-        savedIndex >= 0 ? savedIndex : Math.max(safeDefaultIndex, 0),
-        { initial: true },
-      );
+      await this.loadByIndex(initialIndex, { initial: true });
     } else {
       await this._loadFallback();
     }

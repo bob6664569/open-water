@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  cancelTimeout,
+  requestNextFrame,
+  scheduleTimeout,
+} from '../runtime/browser-platform.js';
 
 const CAMERA_MODE_KEY = 'ocean-boat:camera-mode';
 const CAMERA_MODE_NAMES = [
@@ -27,9 +32,9 @@ export class CameraController {
     reducedMotion = false,
     statusElement = null,
     storage = globalThis.localStorage,
-    requestFrame = globalThis.requestAnimationFrame ?? (callback => callback()),
-    setTimer = globalThis.setTimeout,
-    clearTimer = globalThis.clearTimeout,
+    requestFrame = requestNextFrame,
+    setTimer = scheduleTimeout,
+    clearTimer = cancelTimeout,
   }) {
     this.camera = camera;
     this.boat = boat;

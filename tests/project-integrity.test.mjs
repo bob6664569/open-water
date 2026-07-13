@@ -120,6 +120,16 @@ test('all static module imports resolve to vendored or local files', () => {
   assert.deepEqual(missing, [], `Missing module files:\n${missing.join('\n')}`);
 });
 
+test('controllers do not retain unbound browser-native functions', () => {
+  const unsafeDefault = /=\s*globalThis\.(?:fetch|setTimeout|clearTimeout|requestAnimationFrame)\b/;
+  const unsafe = firstPartyModules()
+    .filter(file => file !== resolve(JS_DIR, 'runtime', 'browser-platform.js'))
+    .filter(file => unsafeDefault.test(readFileSync(file, 'utf8')))
+    .map(file => relative(ROOT, file));
+
+  assert.deepEqual(unsafe, [], `Unbound browser APIs retained by:\n${unsafe.join('\n')}`);
+});
+
 test('the HTML import map and module entry point target existing files', () => {
   const html = readFileSync(resolve(SITE, 'index.html'), 'utf8');
   const importMapMatch = html.match(/<script\s+type="importmap">([\s\S]*?)<\/script>/);
