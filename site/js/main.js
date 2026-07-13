@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -20,6 +19,7 @@ import { BoatHud } from './hud.js';
 import { DriveController } from './drive-controller.js';
 import { CameraController } from './camera-controller.js';
 import { WaterPassRenderer } from './water-pass-renderer.js';
+import { EnvironmentController } from './environment-controller.js';
 
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
@@ -39,113 +39,20 @@ document.body.appendChild(renderer.domElement);
 const performanceManager = new PerformanceManager(renderer, { isTouch: IS_TOUCH });
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x9cbfd8, 180, 640);
-const clearFogColor = new THREE.Color(0x9cbfd8);
-const stormFogColor = new THREE.Color(0x4a5962);
-const atmosphereFogColor = new THREE.Color();
-
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 4000);
 camera.position.set(-12, 5, -12);
-
-const sun = new THREE.Vector3(-0.4, 0.6, -0.7).normalize();
-// Start slightly off the sun axis so the chase camera reveals the reflection immediately.
-const SUN_START_OFFSET = THREE.MathUtils.degToRad(12);
-const startYawFromSun = () => Math.atan2(sun.x, sun.z) + SUN_START_OFFSET;
-const sunLight = new THREE.DirectionalLight(0xfff2dd, 2.0);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(IS_TOUCH ? 1024 : 2048, IS_TOUCH ? 1024 : 2048);
-sunLight.shadow.camera.left = -14;
-sunLight.shadow.camera.right = 14;
-sunLight.shadow.camera.top = 14;
-sunLight.shadow.camera.bottom = -14;
-sunLight.shadow.camera.near = 10;
-sunLight.shadow.camera.far = 160;
-sunLight.shadow.bias = -0.0004;
-scene.add(sunLight);
-scene.add(sunLight.target);
-let sunSprite = null;
-
-const paradiseSkyMaterial = new THREE.ShaderMaterial({
-  uniforms: {
-    uCalm: { value: 0 },
-    uZenith: { value: new THREE.Color(0x48d9e4) },
-    uHorizon: { value: new THREE.Color(0xffc59f) },
-  },
-  vertexShader: /* glsl */`
-    varying vec3 vSkyDirection;
-    void main() {
-      vSkyDirection = normalize(position);
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: /* glsl */`
-    uniform float uCalm;
-    uniform vec3 uZenith;
-    uniform vec3 uHorizon;
-    varying vec3 vSkyDirection;
-    void main() {
-      float sky = max(vSkyDirection.y, 0.0);
-      float horizon = 1.0 - smoothstep(0.02, 0.42, abs(vSkyDirection.y));
-      float zenith = smoothstep(0.08, 0.82, sky);
-      vec3 tint = mix(uHorizon, uZenith, smoothstep(0.05, 0.72, sky));
-      float alpha = uCalm * (horizon * 0.13 + zenith * 0.075);
-      gl_FragColor = vec4(tint, alpha);
-    }
-  `,
-  side: THREE.BackSide,
-  transparent: true,
-  depthWrite: false,
-  toneMapped: false,
-});
-const paradiseSky = new THREE.Mesh(
-  new THREE.SphereGeometry(3500, 32, 16),
-  paradiseSkyMaterial,
-);
-paradiseSky.renderOrder = -1000;
-paradiseSky.frustumCulled = false;
-scene.add(paradiseSky);
-
-function updateAtmosphere(dt) {
-  const storm = THREE.MathUtils.smoothstep(
-    waveField.significantWaveHeight, SEA_PRESETS[2].hs, SEA_PRESETS[4].hs,
-  );
-  const ease = 1 - Math.exp(-dt * 0.75);
-  renderer.toneMappingExposure = THREE.MathUtils.lerp(
-    renderer.toneMappingExposure, THREE.MathUtils.lerp(0.85, 0.48, storm), ease,
-  );
-  if (scene.background) {
-    scene.backgroundIntensity = THREE.MathUtils.lerp(
-      scene.backgroundIntensity, THREE.MathUtils.lerp(1, 0.38, storm), ease,
-    );
-  }
-  if (scene.environment) {
-    scene.environmentIntensity = THREE.MathUtils.lerp(
-      scene.environmentIntensity ?? 1, THREE.MathUtils.lerp(1, 0.62, storm), ease,
-    );
-  }
-  sunLight.intensity = THREE.MathUtils.lerp(
-    sunLight.intensity, THREE.MathUtils.lerp(2, 0.55, storm), ease,
-  );
-  scene.fog.near = THREE.MathUtils.lerp(scene.fog.near, THREE.MathUtils.lerp(180, 58, storm), ease);
-  scene.fog.far = THREE.MathUtils.lerp(scene.fog.far, THREE.MathUtils.lerp(640, 225, storm), ease);
-  atmosphereFogColor.copy(clearFogColor).lerp(stormFogColor, storm * 0.82);
-  scene.fog.color.lerp(atmosphereFogColor, ease);
-  if (sunSprite) {
-    sunSprite.material.opacity = THREE.MathUtils.lerp(
-      sunSprite.material.opacity, THREE.MathUtils.lerp(1, 0.12, storm), ease,
-    );
-  }
-  const calmTarget = waveField.preset === 1 ? 1 : 0;
-  paradiseSkyMaterial.uniforms.uCalm.value = THREE.MathUtils.damp(
-    paradiseSkyMaterial.uniforms.uCalm.value, calmTarget, 0.9, dt,
-  );
-}
-
 const waveField = new WaveField();
+const environment = new EnvironmentController({
+  renderer,
+  scene,
+  waveField,
+  isTouch: IS_TOUCH,
+});
+const { sunLight, paradiseSky } = environment;
 const ocean = new Ocean(waveField, performanceManager.quality);
 scene.add(ocean.mesh);
 scene.add(ocean.patch);
-const boat = new Boat(waveField, scene, startYawFromSun());
+const boat = new Boat(waveField, scene, environment.startYaw());
 const effects = new BoatEffects(scene, waveField, boat);
 const audio = new BoatAudio(waveField);
 effects.onExhaustPop = (intensity, position) => audio.exhaustPop(intensity, position);
@@ -531,85 +438,15 @@ fetch('./assets/boats/index.json')
   })
   .catch(() => boat.loadModel('./assets/boat.glb').finally(() => { initialBoatReady = true; finishInitialLoadingWhenReady(); }));
 
-const skyUrl = IS_TOUCH ? './assets/sky_clear_1k.hdr' : './assets/sky_clear_4k.hdr';
-new RGBELoader()
-  .setDataType(THREE.HalfFloatType)
-  .load(skyUrl, (tex) => {
-    tex.mapping = THREE.EquirectangularReflectionMapping;
-    const { data, width, height } = tex.image;
-
-    let bestLum = -1, bestU = 0, bestV = 0;
-    const horizon = [0, 0, 0];
-    let hn = 0;
-    const channel = (index) => tex.type === THREE.HalfFloatType
-      ? THREE.DataUtils.fromHalfFloat(data[index]) : data[index];
-    for (let y = 0; y < height; y += 4) {
-      for (let x = 0; x < width; x += 4) {
-        const i = (y * width + x) * 4;
-        const r = channel(i), g = channel(i + 1), b = channel(i + 2);
-        const lum = r * 0.3 + g * 0.6 + b * 0.1;
-        const v = 1 - y / height;
-        if (lum > bestLum) { bestLum = lum; bestU = x / width; bestV = v; }
-        if (v > 0.5 && v < 0.54) {
-          horizon[0] += r; horizon[1] += g; horizon[2] += b;
-          hn++;
-        }
-      }
-    }
-    const lon = (bestU - 0.5) * Math.PI * 2;
-    const lat = (bestV - 0.5) * Math.PI;
-    sun.set(Math.cos(lon) * Math.cos(lat), Math.sin(lat),
-            Math.sin(lon) * Math.cos(lat));
-    if (sun.y < 0.05) sun.y = 0.05;
-    sun.normalize();
-    ocean.uniforms.uSunDir.value.copy(sun);
-    boat.setStartYaw(startYawFromSun(), true);
-    cameraController.snap();
-
-    const fogC = new THREE.Color(
-      horizon[0] / hn, horizon[1] / hn, horizon[2] / hn);
-    fogC.r = fogC.r / (1 + fogC.r); fogC.g = fogC.g / (1 + fogC.g);
-    fogC.b = fogC.b / (1 + fogC.b);
-    scene.fog.color.copy(fogC);
-    clearFogColor.copy(fogC);
-
-    scene.background = tex;
-    scene.backgroundIntensity = 1.0;
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromEquirectangular(tex).texture;
-    pmrem.dispose();
-
-    const sc = document.createElement('canvas');
-    sc.width = sc.height = 256;
-    const sctx = sc.getContext('2d');
-    const sg = sctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-    sg.addColorStop(0, 'rgba(255,252,240,1)');
-    sg.addColorStop(0.07, 'rgba(255,248,225,0.95)');
-    sg.addColorStop(0.2, 'rgba(255,238,195,0.35)');
-    sg.addColorStop(0.55, 'rgba(255,228,175,0.1)');
-    sg.addColorStop(1, 'rgba(255,225,165,0)');
-    sctx.fillStyle = sg;
-    sctx.fillRect(0, 0, 256, 256);
-    const sunSpr = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: new THREE.CanvasTexture(sc),
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      fog: false,
-    }));
-    sunSpr.position.copy(sun).multiplyScalar(3000);
-    sunSpr.scale.set(750, 750, 1);
-    sunHolder.add(sunSpr);
-    sunSprite = sunSpr;
+environment.load({
+  ocean,
+  boat,
+  cameraController,
+  onReady: () => {
     skyReady = true;
     finishInitialLoadingWhenReady();
-  }, undefined, () => {
-    skyReady = true;
-    finishInitialLoadingWhenReady();
-  });
-
-const sunHolder = new THREE.Group();
-scene.add(sunHolder);
+  },
+});
 
 const waterPasses = new WaterPassRenderer({
   renderer,
@@ -1091,7 +928,7 @@ renderer.setAnimationLoop(() => {
   const frameDt = Math.min(clock.getDelta(), 0.05);
   const dt = appStarted ? frameDt : 0;
   waveField.update(dt, boat.pos.x, boat.pos.z);
-  updateAtmosphere(dt);
+  environment.updateAtmosphere(dt);
   drive.update(dt, waveField.time, gestureState);
   boat.update(dt);
   achievements.update(dt, boat, waveField, fauna.achievementSources);
@@ -1100,16 +937,15 @@ renderer.setAnimationLoop(() => {
   ocean.uniforms.uFoamTrail.value = foamTrail.texture;
   ocean.uniforms.uTrailCenter.value.copy(foamTrail.center);
   effects.update(dt);
-  sunHolder.position.set(camera.position.x, 0, camera.position.z);
+  environment.positionSunHolder(camera.position);
   cameraController.update(dt);
   firstVoyageGuide.update(dt);
-  paradiseSky.position.copy(camera.position);
+  environment.positionSky(camera.position);
   audio.update(boat, camera, dt);
   weather.update(dt);
   fauna.update(dt);
   boatHud.update(boat.speedKn, drive.throttle, drive.wheel);
-  sunLight.position.copy(boat.pos).addScaledVector(sun, 80);
-  sunLight.target.position.copy(boat.pos);
+  environment.positionSunLight(boat.pos);
   performanceManager.beginGpu();
   waterPasses.render(frameStart, currentQuality);
   composer.render();

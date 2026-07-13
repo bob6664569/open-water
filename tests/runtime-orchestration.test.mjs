@@ -9,9 +9,11 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     "import { DriveController } from './drive-controller.js';",
     "import { CameraController } from './camera-controller.js';",
     "import { WaterPassRenderer } from './water-pass-renderer.js';",
+    "import { EnvironmentController } from './environment-controller.js';",
     'const drive = new DriveController(',
     'const cameraController = new CameraController(',
     'const waterPasses = new WaterPassRenderer(',
+    'const environment = new EnvironmentController(',
     'drive.update(dt, waveField.time, gestureState);',
     'cameraController.update(dt);',
     'waterPasses.render(frameStart, currentQuality);',
@@ -26,7 +28,7 @@ test('the frame loop preserves simulation and rendering dependency order', () =>
   const frameLoop = mainSource.slice(loopStart);
   const orderedSteps = [
     'waveField.update(',
-    'updateAtmosphere(',
+    'environment.updateAtmosphere(',
     'drive.update(',
     'boat.update(',
     'achievements.update(',
