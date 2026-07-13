@@ -185,6 +185,7 @@ const REWARD_VESSELS = [
   { file: /ss_minnow_iii/i, reward: 'minnow' },
 ];
 const LAST_BOAT_KEY = 'ocean-boat:last-vessel';
+const MEGAYACHT_HORN_KEY = 'ocean-boat:megayacht-horn-played';
 const WAVE_INTENSITY_KEY = 'ocean-boat:wave-intensity';
 const CAM_MODE_KEY = 'ocean-boat:camera-mode';
 const initialLoader = document.getElementById('loading');
@@ -363,6 +364,7 @@ function launchExperience() {
   welcome?.setAttribute('aria-hidden', 'true');
   if (welcome) welcome.inert = true;
   try { audio.start(); } catch {  }
+  void playMegayachtHornOnce(boat.spec);
   scheduleHelpDismiss();
   scheduleControlReveals();
   playVoyageIntro();
@@ -415,6 +417,27 @@ function storedBoatName() {
 
 function rememberBoat(name) {
   try { localStorage.setItem(LAST_BOAT_KEY, name); } catch {  }
+}
+
+let megayachtHornPending = false;
+
+function megayachtHornPlayed() {
+  try { return localStorage.getItem(MEGAYACHT_HORN_KEY) === '1'; } catch { return false; }
+}
+
+function rememberMegayachtHorn() {
+  try { localStorage.setItem(MEGAYACHT_HORN_KEY, '1'); } catch {  }
+}
+
+async function playMegayachtHornOnce(spec) {
+  if (!appStarted || spec?.id !== 'frickies_yacht'
+    || megayachtHornPending || megayachtHornPlayed()) return;
+  megayachtHornPending = true;
+  try {
+    if (await audio.megayachtHorn()) rememberMegayachtHorn();
+  } finally {
+    megayachtHornPending = false;
+  }
 }
 
 function storedWaveIntensity() {
@@ -490,6 +513,7 @@ async function loadBoatByIndex(i, { initial = false, direction = 0 } = {}) {
                          m ? parseFloat(m[1]) : spec.length,
                          !!(m && m[2]) || !!spec.reversed);
     achievements.recordBoat(spec.id || name);
+    void playMegayachtHornOnce(spec);
   } finally {
     rememberBoat(name);
     if (initial) {

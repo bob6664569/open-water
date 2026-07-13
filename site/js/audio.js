@@ -77,6 +77,8 @@ const BIRD_CRIES = {
   ],
 };
 
+const MEGAYACHT_HORN = './assets/audio/vessels/megayacht-horn.mp3';
+
 const ALL_ASSETS = [...new Set([
   ...Object.values(ENGINE_BANKS).flatMap(engineAssets),
   ...Object.values(AMBIENT_ASSETS),
@@ -127,6 +129,7 @@ export class BoatAudio {
     this.impactProximity = 0.7;
 
     this.assetRequests = null;
+    this.oneShotRequests = new Map();
 
     this._enginePosition = new THREE.Vector3();
     this._listenerForward = new THREE.Vector3();
@@ -163,11 +166,14 @@ export class BoatAudio {
     this.gullBus.gain.value = 0.5;
     this.birdBus = ctx.createGain();
     this.birdBus.gain.value = 0.38;
+    this.vesselBus = ctx.createGain();
+    this.vesselBus.gain.value = 0.72;
     this.engineBus.connect(this.master);
     this.ambientBus.connect(this.ambientDuck).connect(this.master);
     this.thunderBus.connect(this.master);
     this.gullBus.connect(this.master);
     this.birdBus.connect(this.master);
+    this.vesselBus.connect(this.master);
 
     this._startProceduralLayers();
     this._requestAssets();
@@ -310,6 +316,45 @@ export class BoatAudio {
     source.connect(gain).connect(destination);
     source.start(this.ctx.currentTime, Math.random() * Math.max(0.01, buffer.duration - 0.1));
     return source;
+  }
+
+  async _oneShotBuffer(path) {
+    const decoded = this.buffers.get(path);
+    if (decoded) return decoded;
+    if (!this.oneShotRequests.has(path)) {
+      const request = fetch(path)
+        .then(response => {
+          if (!response.ok) throw new Error(`${response.status} ${path}`);
+          return response.arrayBuffer();
+        })
+        .then(data => this.ctx.decodeAudioData(data.slice(0)))
+        .then(buffer => {
+          this.buffers.set(path, buffer);
+          return buffer;
+        })
+        .finally(() => this.oneShotRequests.delete(path));
+      this.oneShotRequests.set(path, request);
+    }
+    return this.oneShotRequests.get(path);
+  }
+
+  async megayachtHorn() {
+    if (!this.started || !this.ctx) return false;
+    const ctx = this.ctx;
+    try {
+      const buffer = await this._oneShotBuffer(MEGAYACHT_HORN);
+      if (this.ctx !== ctx || ctx.state === 'closed') return false;
+      if (ctx.state === 'suspended') await ctx.resume();
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.vesselBus);
+      source.start(ctx.currentTime);
+      return true;
+    } catch (error) {
+      console.warn(`Audio unavailable: ${MEGAYACHT_HORN}`, error);
+      return false;
+    }
   }
 
   _crossfadedTail(buffer, startSeconds, endSeconds, fadeSeconds) {

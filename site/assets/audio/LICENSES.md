@@ -1,7 +1,8 @@
 # Audio sources and licenses
 
-Except for the Redline Phantom engine noted below, the recordings listed here
-were published under the Creative Commons Zero 1.0 Universal dedication (CC0 1.0):
+Except for the Redline Phantom engine and megayacht horn noted below, the
+recordings listed here were published under the Creative Commons Zero 1.0
+Universal dedication (CC0 1.0):
 https://creativecommons.org/publicdomain/zero/1.0/
 
 The files shipped with this project are edited derivatives of the Freesound
@@ -71,3 +72,9 @@ loudness-normalized, and encoded as MP3 for browser playback.
 - `animals/parrot-1.mp3`, `animals/parrot-2.mp3`, `animals/parrot-3.mp3`:
   clipped from “Macaw Parrot screaming in a park” by felix.blume,
   https://freesound.org/s/504988/ (calm-mode parrots)
+
+## Vessels
+
+- `vessels/megayacht-horn.mp3`: “Boat Horn” by PearceWilsonKing (Freesound),
+  https://pixabay.com/fr/sound-effects/ville-boat-horn-103003/. Used under the
+  [Pixabay Content License](https://pixabay.com/service/license-summary/).
