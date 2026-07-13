@@ -14,6 +14,7 @@ import { EnvironmentController } from './rendering/environment-controller.js';
 import { createFaunaManager } from './fauna/index.js';
 import { BoatAudio } from './runtime/audio.js';
 import { PerformanceManager } from './runtime/performance.js';
+import { QualityController } from './runtime/quality-controller.js';
 import { AchievementManager } from './ui/achievements.js';
 import { FirstVoyageGuide } from './ui/first-voyage.js';
 import { BoatHud } from './ui/hud.js';
@@ -302,121 +303,23 @@ composer.addPass(bloom);
 composer.addPass(new OutputPass());
 ocean.uniforms.uResolution.value.copy(bufSize);
 
-let currentQuality = null;
-let pendingQuality = null;
-let pendingQualityForce = false;
-let appliedPixelRatio = 0;
-let appliedWidth = 0;
-let appliedHeight = 0;
-const qualityControl = document.getElementById('quality-control');
-const qualityCurrent = document.getElementById('quality-current');
-const qualitySelect = document.getElementById('quality-select');
-
-function syncQualityControl() {
-  if (!qualityControl) return;
-  const stats = performanceManager.stats;
-  qualityControl.dataset.quality = stats.profile;
-  qualityControl.dataset.mode = stats.mode;
-  qualityCurrent.textContent = stats.profile;
-  qualitySelect.value = stats.mode === 'auto' ? 'auto' : stats.profile;
-  qualityControl.title = stats.mode === 'auto'
-    ? `Adaptive quality · currently ${stats.profile}`
-    : `Quality forced to ${stats.profile}`;
-}
-
-function applyQuality(quality, force = false) {
-  const previous = currentQuality;
-  currentQuality = quality;
-  const pixelRatio = Math.min(devicePixelRatio, quality.dprMax) * quality.scale;
-  const ratioChanged = Math.abs(pixelRatio - appliedPixelRatio) > 0.001;
-  const viewportChanged = force || innerWidth !== appliedWidth || innerHeight !== appliedHeight;
-  if (ratioChanged || viewportChanged) {
-    renderer.setPixelRatio(pixelRatio);
-    renderer.setSize(innerWidth, innerHeight);
-    if (ratioChanged) composer.setPixelRatio(pixelRatio);
-    if (viewportChanged) composer.setSize(innerWidth, innerHeight);
-    appliedPixelRatio = pixelRatio;
-    appliedWidth = innerWidth;
-    appliedHeight = innerHeight;
-  }
-  waterPasses.setQuality(quality, previous, innerWidth, innerHeight, {
-    force,
-    viewportChanged,
-  });
-  bloom.enabled = quality.bloom;
-  bloom.strength = quality.bloomStrength;
-  for (const target of [composer.renderTarget1, composer.renderTarget2]) {
-    if (!target || target.samples === quality.msaa) continue;
-    target.samples = quality.msaa;
-    target.dispose();
-  }
-  if (force || !previous || previous.shadowSize !== quality.shadowSize) {
-    sunLight.shadow.mapSize.set(quality.shadowSize, quality.shadowSize);
-    if (sunLight.shadow.map) {
-      sunLight.shadow.map.dispose();
-      sunLight.shadow.map = null;
-    }
-  }
-  boat.setPerformanceBudget(quality);
-  ocean.setPerformanceBudget(quality);
-  effects.setPerformanceBudget(quality);
-  weather.setPerformanceBudget(quality);
-  fauna.setPerformanceBudget(quality);
-  renderer.getDrawingBufferSize(ocean.uniforms.uResolution.value);
-  document.documentElement.dataset.quality = quality.id;
-  syncQualityControl();
-}
-
-function queueQuality(quality, force = false) {
-  pendingQuality = quality;
-  pendingQualityForce ||= force;
-}
-
-performanceManager.onChange = quality => queueQuality(quality);
-applyQuality(performanceManager.quality, true);
-
-let qualityPointerInteraction = false;
-qualitySelect?.addEventListener('pointerdown', () => { qualityPointerInteraction = true; });
-qualitySelect?.addEventListener('keydown', () => { qualityPointerInteraction = false; });
-qualitySelect?.addEventListener('pointercancel', () => { qualityPointerInteraction = false; });
-qualitySelect?.addEventListener('change', () => {
-  const releasePointerFocus = qualityPointerInteraction;
-  qualityPointerInteraction = false;
-  const mode = qualitySelect.value;
-  performanceManager.setMode(mode);
-  achievements.recordQualityChange();
-  const url = new URL(location.href);
-  if (mode === 'auto') url.searchParams.delete('quality');
-  else url.searchParams.set('quality', mode);
-  history.replaceState(null, '', url);
-  syncQualityControl();
-  if (releasePointerFocus) requestAnimationFrame(() => qualitySelect.blur());
+const qualityController = new QualityController({
+  performanceManager,
+  renderer,
+  composer,
+  waterPasses,
+  bloom,
+  sunLight,
+  budgetTargets: [boat, ocean, effects, weather, fauna],
+  resolutionTarget: ocean.uniforms.uResolution.value,
+  achievements,
+  elements: {
+    control: document.getElementById('quality-control'),
+    current: document.getElementById('quality-current'),
+    select: document.getElementById('quality-select'),
+  },
 });
-
-const showPerformanceHud = new URLSearchParams(location.search).has('perf');
-const performanceHud = showPerformanceHud ? document.createElement('pre') : null;
-let nextPerformanceHudAt = 0;
-if (performanceHud) {
-  Object.assign(performanceHud.style, {
-    position: 'fixed', left: '12px', bottom: '88px', zIndex: '50', margin: '0',
-    padding: '8px 10px', color: '#bcecff', background: 'rgba(0,10,18,.78)',
-    border: '1px solid rgba(188,236,255,.25)', borderRadius: '5px',
-    font: '10px/1.45 ui-monospace, monospace', pointerEvents: 'none',
-  });
-  document.body.appendChild(performanceHud);
-}
-
-function updatePerformanceHud(now) {
-  if (!performanceHud || now < nextPerformanceHudAt) return;
-  nextPerformanceHudAt = now + 250;
-  const s = performanceManager.stats;
-  performanceHud.textContent = [
-    `${s.profile.toUpperCase()} ${s.mode} · scale ${s.scale.toFixed(2)}`,
-    `frame p95 ${s.frameP95.toFixed(1)} ms · target ${s.targetFps} fps`,
-    `CPU p95 ${s.cpuP95.toFixed(1)} ms · GPU p90 ${s.gpuP90.toFixed(1)} ms`,
-    `${s.calls} calls · ${(s.triangles / 1e6).toFixed(2)} M triangles`,
-  ].join('\n');
-}
+qualityController.bind();
 
 const gestureDrive = new GestureDriveController({
   element: document.getElementById('gesture-drive'),
@@ -506,7 +409,7 @@ const boatHud = new BoatHud(elKn, elThrottle, elRudder);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
-  queueQuality(currentQuality, true);
+  qualityController.resize();
 });
 
 if (new URLSearchParams(location.search).has('debug')) {
@@ -520,14 +423,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const frameStart = performance.now();
   performanceManager.beginFrame(frameStart);
-  if (pendingQuality) {
-    // Reallocate before rendering; doing it after composition produces a black flash.
-    const quality = pendingQuality;
-    const force = pendingQualityForce;
-    pendingQuality = null;
-    pendingQualityForce = false;
-    applyQuality(quality, force);
-  }
+  qualityController.applyPending();
   renderer.info.reset();
   const frameDt = Math.min(clock.getDelta(), 0.05);
   const dt = appStarted ? frameDt : 0;
@@ -551,11 +447,11 @@ renderer.setAnimationLoop(() => {
   boatHud.update(boat.speedKn, drive.throttle, drive.wheel);
   environment.positionSunLight(boat.pos);
   performanceManager.beginGpu();
-  waterPasses.render(frameStart, currentQuality);
+  waterPasses.render(frameStart, qualityController.current);
   composer.render();
   performanceManager.endGpu();
   performanceManager.endFrame();
-  updatePerformanceHud(frameStart);
+  qualityController.updateHud(frameStart);
   renderedFrames++;
   finishInitialLoadingWhenReady();
 });

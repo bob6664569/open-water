@@ -13,6 +13,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     "import { VesselController } from './controllers/vessel-controller.js';",
     "import { GestureDriveController } from './controllers/gesture-drive-controller.js';",
     "import { ViewInputController } from './controllers/view-input-controller.js';",
+    "import { QualityController } from './runtime/quality-controller.js';",
     'const drive = new DriveController(',
     'const cameraController = new CameraController(',
     'const waterPasses = new WaterPassRenderer(',
@@ -20,10 +21,12 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     'const vessels = new VesselController(',
     'const gestureDrive = new GestureDriveController(',
     'const viewInput = new ViewInputController(',
+    'const qualityController = new QualityController(',
     'void vessels.loadCatalog();',
     'drive.update(dt, waveField.time, gestureDrive.state);',
     'cameraController.update(dt);',
-    'waterPasses.render(frameStart, currentQuality);',
+    'qualityController.applyPending();',
+    'waterPasses.render(frameStart, qualityController.current);',
   ]) {
     assert.ok(mainSource.includes(contract), `missing runtime contract: ${contract}`);
   }
@@ -62,13 +65,11 @@ test('the frame loop preserves simulation and rendering dependency order', () =>
   }
 });
 
-test('quality changes resize water targets before delegating subsystem budgets', () => {
-  const applyStart = mainSource.indexOf('function applyQuality(');
-  const applyEnd = mainSource.indexOf('\nfunction queueQuality(', applyStart);
-  assert.ok(applyStart >= 0 && applyEnd > applyStart);
-  const applyQuality = mainSource.slice(applyStart, applyEnd);
-  const waterIndex = applyQuality.indexOf('waterPasses.setQuality(');
-  const boatIndex = applyQuality.indexOf('boat.setPerformanceBudget(');
-  assert.ok(waterIndex >= 0);
-  assert.ok(boatIndex > waterIndex);
+test('quality reallocations stay before rendering and resize delegates to the controller', () => {
+  const loopStart = mainSource.indexOf('renderer.setAnimationLoop(() => {');
+  const frameLoop = mainSource.slice(loopStart);
+  const qualityIndex = frameLoop.indexOf('qualityController.applyPending();');
+  const renderIndex = frameLoop.indexOf('waterPasses.render(');
+  assert.ok(qualityIndex >= 0 && renderIndex > qualityIndex);
+  assert.ok(mainSource.includes('qualityController.resize();'));
 });
