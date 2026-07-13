@@ -7,6 +7,7 @@ const mainSource = await readFile(new URL('../site/js/main.js', import.meta.url)
 test('main delegates driving, cameras and water passes to focused runtime controllers', () => {
   for (const contract of [
     "import { DriveController } from './controllers/drive-controller.js';",
+    "import { WakeField } from './simulation/wake-field.js';",
     "import { CameraController } from './controllers/camera-controller.js';",
     "import { WaterPassRenderer } from './rendering/water-pass-renderer.js';",
     "import { EnvironmentController } from './rendering/environment-controller.js';",
@@ -16,6 +17,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     "import { QualityController } from './runtime/quality-controller.js';",
     "import { ExperienceController } from './ui/experience-controller.js';",
     'const drive = new DriveController(',
+    'const wakeField = new WakeField(',
     'const cameraController = new CameraController(',
     'const waterPasses = new WaterPassRenderer(',
     'const environment = new EnvironmentController(',
@@ -41,6 +43,7 @@ test('the frame loop preserves simulation and rendering dependency order', () =>
   const frameLoop = mainSource.slice(loopStart);
   const orderedSteps = [
     'waveField.update(',
+    'wakeField.update(',
     'environment.updateAtmosphere(',
     'drive.update(',
     'boat.update(',

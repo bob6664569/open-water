@@ -123,7 +123,13 @@ export class WaveField {
     this._material = new THREE.Vector3();
     this._velocityTmp = new THREE.Vector3();
     this._currentTmp = new THREE.Vector3();
+    this._wakeTmp = new THREE.Vector4();
+    this.wakeField = null;
     this._syncSpectrum(0);
+  }
+
+  setWakeField(wakeField) {
+    this.wakeField = wakeField || null;
   }
 
   setSeaPreset(index) {
@@ -266,7 +272,9 @@ export class WaveField {
   heightAt(x, z) {
     const p = this._materialPointAt(x, z, 3);
     this.displacement(p.x, p.z, this._tmp);
-    return this._tmp.y;
+    const wakeHeight = this.wakeField
+      ? this.wakeField.sample(x, z, this._wakeTmp).x : 0;
+    return this._tmp.y + wakeHeight;
   }
 
   velocityAt(x, z, out) {
@@ -281,9 +289,11 @@ export class WaveField {
       vy -= w.A * w.omega * c;
     }
     this.currentAt(x, z, this._currentTmp);
+    const wakeVertical = this.wakeField
+      ? this.wakeField.sample(x, z, this._wakeTmp).w : 0;
     return out.set(
       vx + this._currentTmp.x,
-      vy,
+      vy + wakeVertical,
       vz + this._currentTmp.z,
     );
   }
@@ -302,6 +312,11 @@ export class WaveField {
       nx -= w.dx * ka * c;
       nz -= w.dz * ka * c;
       ny -= w.Q * ka * si;
+    }
+    if (this.wakeField) {
+      this.wakeField.sample(x, z, this._wakeTmp);
+      nx -= this._wakeTmp.y;
+      nz -= this._wakeTmp.z;
     }
     return out.set(nx, ny, nz).normalize();
   }
@@ -350,6 +365,14 @@ export class WaveField {
     for (const w of this.waves) {
       const phi = w.k * (w.dx * px + w.dz * pz) + w.phase;
       height += w.A * Math.sin(phi);
+    }
+    if (this.wakeField) {
+      this.wakeField.sample(x, z, this._wakeTmp);
+      height += this._wakeTmp.x;
+      velocityOut.y += this._wakeTmp.w;
+      normalOut.x -= this._wakeTmp.y;
+      normalOut.z -= this._wakeTmp.z;
+      normalOut.normalize();
     }
     return height;
   }

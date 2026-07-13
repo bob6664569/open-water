@@ -143,7 +143,10 @@ in `localStorage`: no account, no network calls.
   size/alpha, fading on water contact), mist, turn spray thrown off the outer
   flank based on the maneuver's energy, impact plumes, and a persistent foam
   wake. Hull water displacement in the ocean shader (bow wave, trough, Kelvin
-  V-wake).
+  V-wake). A bounded world-space wake field persists through turns, drifts with
+  the surface current and is shared by GPU displacement plus CPU height, normal
+  and vertical-water-velocity queries, so a hull physically reacts when it
+  crosses an older wake.
 - **Sky**: 4k Poly Haven HDRI (CC0) as backdrop plus IBL; sun direction and haze
   color extracted automatically from the file's pixels.
 - **Rendering**: planar reflection of the boat in the water (mirror camera,

@@ -151,16 +151,28 @@ test('wind strengthens micro-ripples without sliding the normal map over waves',
   assert.match(shader.fragmentShader, /float windSpeed = length\(uWind\.xz\)/);
   assert.match(shader.fragmentShader, /vec2\(uTime \* 0\.011, uTime \* 0\.006\)/);
   assert.doesNotMatch(shader.fragmentShader, /wind(?:Dir|Cross) \* uTime/);
+  assert.match(shader.vertexShader, /uniform vec4 uWake\[WAKE_MAX\]/);
+  assert.match(shader.vertexShader, /uniform vec2 uWakeExtra\[WAKE_MAX\]/);
+  assert.match(shader.vertexShader, /#if IS_PATCH == 1/);
 });
 
 test('ocean updates reuse uniforms and snap both meshes to their grids', () => {
   const waveField = new WaveField();
+  waveField.setWakeField({
+    fillUniforms: (_x, _z, wakeUniforms, metaUniforms, extraUniforms) => {
+      wakeUniforms[0].set(3, 4, 0.2, 2);
+      metaUniforms[0].set(0, 1, 2.1, 1.4);
+      extraUniforms[0].set(5.2, 3.4);
+      return 1;
+    },
+  });
   const ocean = new Ocean(waveField, { oceanFarSegments: 10, oceanPatchSegments: 10 });
   const boat = {
     pos: new THREE.Vector3(123.4, 0.2, -87.6),
     quat: new THREE.Quaternion(),
     speedKn: 12,
     wet: 0.8,
+    angVelB: new THREE.Vector3(0, 0.3, 0),
     spec: { length: 6.5, beam: 2.1 },
     visualRig: null,
   };
@@ -175,7 +187,11 @@ test('ocean updates reuse uniforms and snap both meshes to their grids', () => {
     ocean.patch.position.x, ocean.patch.position.z,
   ]);
   assert.equal(ocean.uniforms.uBoatWet.value, boat.wet);
+  assert.ok(ocean.uniforms.uBoatTurn.value > 0.5);
   assert.deepEqual(ocean.uniforms.uBoatSize.value.toArray(), [6.5, 2.1]);
+  assert.equal(ocean.uniforms.uWakeCount.value, 1);
+  assert.deepEqual(ocean.uniforms.uWake.value[0].toArray(), [3, 4, 0.2, 2]);
+  assert.deepEqual(ocean.uniforms.uWakeExtra.value[0].toArray(), [5.2, 3.4]);
 });
 
 test('particle budgets scale every pool and its GPU draw range', () => {

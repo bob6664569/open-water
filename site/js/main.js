@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { WaveField, SEA_PRESETS } from './simulation/waves.js';
+import { WakeField } from './simulation/wake-field.js';
 import { Boat } from './simulation/boat.js';
 import { Ocean } from './rendering/ocean.js';
 import { BoatEffects } from './rendering/effects.js';
@@ -46,6 +47,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 4000);
 camera.position.set(-12, 5, -12);
 const waveField = new WaveField();
+const wakeField = new WakeField();
+waveField.setWakeField(wakeField);
 const environment = new EnvironmentController({
   renderer,
   scene,
@@ -205,6 +208,7 @@ gestureDrive.bind();
 
 function resetBoat() {
   drive.resetOutput();
+  wakeField.clear();
   boat.reset();
   achievements.resetFlight();
   achievements.resetCircle();
@@ -288,7 +292,8 @@ addEventListener('resize', () => {
 
 if (new URLSearchParams(location.search).has('debug')) {
   window.openWater = {
-    boat, waveField, camera, ocean, effects, foamTrail, weather, audio, renderer, achievements,
+    boat, waveField, wakeField, camera, ocean, effects, foamTrail,
+    weather, audio, renderer, achievements,
     snapCamera: () => cameraController.snap(),
     environmentState: () => ({
       trueWindMps: boat.trueWind.length(),
@@ -297,6 +302,7 @@ if (new URLSearchParams(location.search).has('debug')) {
       stwKn: boat.speedKn,
       sogKn: boat.groundSpeedKn,
       gustFactor: waveField.gustFactor,
+      wakeSources: wakeField.activeCount,
     }),
   };
 }
@@ -310,6 +316,7 @@ renderer.setAnimationLoop(() => {
   const frameDt = Math.min(clock.getDelta(), 0.05);
   const dt = experience.started ? frameDt : 0;
   waveField.update(dt, boat.pos.x, boat.pos.z);
+  wakeField.update(dt, boat, waveField);
   environment.updateAtmosphere(dt);
   drive.update(dt, waveField.time, gestureDrive.state);
   boat.update(dt);

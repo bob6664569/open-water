@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WAKE_RENDER_SOURCES } from '../simulation/wake-field.js';
 
 // A coarse far mesh and a boat-following fine patch share uniforms. Their crossed
 // skirts hide overlap z-fighting while preserving detailed near-field displacement.
@@ -232,12 +233,29 @@ export class Ocean {
       uWind: { value: new THREE.Vector3(0, 0, 1) },
       uWaveDirs: { value: u.dirs },
       uWaveAmps: { value: u.amps },
+      uWakeCount: { value: 0 },
+      uWake: {
+        value: Array.from(
+          { length: WAKE_RENDER_SOURCES }, () => new THREE.Vector4(),
+        ),
+      },
+      uWakeMeta: {
+        value: Array.from(
+          { length: WAKE_RENDER_SOURCES }, () => new THREE.Vector4(),
+        ),
+      },
+      uWakeExtra: {
+        value: Array.from(
+          { length: WAKE_RENDER_SOURCES }, () => new THREE.Vector2(),
+        ),
+      },
       uSteepSum: { value: waveField.totalSteepness },
       uNormalTex: { value: makeWaterNormalTexture() },
       uBoat: { value: new THREE.Vector4(0, 0, 0, 1) },
       uBoatSpeed: { value: 0 },
       uBoatFroude: { value: 0 },
       uBoatWet: { value: 1 },
+      uBoatTurn: { value: 0 },
       uBoatSize: { value: new THREE.Vector2(6.5, 2.35) },
       uBoatY: { value: 0 },
       uPatchCenter: { value: new THREE.Vector2() },
@@ -320,6 +338,7 @@ export class Ocean {
       WAVE_NRM: 2,
       IS_PATCH: isPatch ? 1 : 0,
       NAV_MAX: 4,
+      WAKE_MAX: WAKE_RENDER_SOURCES,
     };
 
     mat.onBeforeCompile = (shader) => {
@@ -333,10 +352,15 @@ export class Ocean {
           uniform vec3 uWind;
           uniform vec4 uWaveDirs[WAVE_COUNT];
           uniform vec3 uWaveAmps[WAVE_COUNT];
+          uniform int uWakeCount;
+          uniform vec4 uWake[WAKE_MAX];
+          uniform vec4 uWakeMeta[WAKE_MAX];
+          uniform vec2 uWakeExtra[WAKE_MAX];
           uniform vec4 uBoat;
           uniform float uBoatSpeed;
           uniform float uBoatFroude;
           uniform float uBoatWet;
+          uniform float uBoatTurn;
           uniform vec2 uBoatSize;
           uniform vec2 uPatchCenter;
           uniform mat4 uReflMatrix;
@@ -389,26 +413,36 @@ export class Ocean {
             float bowSide = (0.025 * hullB + 0.11 * hullB * spf) * wetF
               * exp(-(pow((along - 0.36 * hullL) / (0.18 * hullL), 2.0)
                       + pow((abs(lat) - 0.48 * hullB) / (0.3 * hullB), 2.0)));
-            float behind = -(along + 0.43 * hullL);
+            float sternBehind = -(along + 0.43 * hullL);
             float wk = 0.0;
-            if (behind > 0.0 && uBoatSpeed > 1.0) {
+            if (sternBehind > 0.0 && uBoatSpeed > 1.0) {
 
-              float washHalf = 0.34 * hullB + behind * 0.11;
-              float washW = exp(-pow(lat / washHalf, 2.0)) * exp(-behind / 15.0);
-              wk -= 0.04 * hullB * spf * washW * exp(-behind * 0.2);
-              float turb = ob_vnoise(vec2(behind * 0.7 - uTime * 2.6, lat * 1.1))
+              float washHalf = 0.34 * hullB + sternBehind * 0.11;
+              float washW = exp(-pow(lat / washHalf, 2.0))
+                          * exp(-sternBehind / 15.0);
+              wk -= 0.04 * hullB * spf * washW * exp(-sternBehind * 0.2);
+              float turb = ob_vnoise(vec2(sternBehind * 0.7 - uTime * 2.6,
+                                           lat * 1.1))
                            - 0.5;
               wk += turb * 0.035 * hullB * spf * washW;
+              gSteep += washW * spf * 0.105
+                      * exp(-sternBehind / (1.6 * hullL));
+            }
 
-              float grow = smoothstep(1.0, 7.0, behind);
-              float wakeSlope = mix(0.34, 0.2, smoothstep(0.5, 1.5, uBoatFroude));
-              float arm = abs(abs(lat) - 0.42 * hullB - behind * wakeSlope);
+            // Start the bow-wave a little ahead of the stem.  A 0.46 slope is
+            // deliberately broader than the ideal Kelvin cusp so it reads at
+            // the gameplay camera height.
+            float bowFraction = mix(0.54, 0.5, uBoatTurn);
+            float bowBehind = bowFraction * hullL - along;
+            if (bowBehind > 0.0 && uBoatSpeed > 1.0) {
+              float grow = smoothstep(0.15, 2.2, bowBehind);
+              float wakeSlope = 0.46;
+              float arm = abs(abs(lat) - bowBehind * wakeSlope);
               float amp = 0.09 * hullB * spf * grow
-                        * exp(-behind / (2.2 * hullL + 8.0 * spf));
-              wk += amp * exp(-pow(arm / max(0.32 * hullB, 0.4), 2.0))
-                    * (0.65 + 0.35 * sin(behind * 0.8 - arm));
-              gSteep += washW * spf * 0.105 * exp(-behind / (1.6 * hullL))
-                      + amp * exp(-pow(arm / max(0.32 * hullB, 0.4), 2.0)) * 0.03;
+                        * exp(-bowBehind / (1.15 * hullL + 4.0));
+              float bowCrest = exp(-pow(arm / max(0.28 * hullB, 0.34), 2.0));
+              wk += amp * bowCrest;
+              gSteep += amp * bowCrest * 0.045;
             }
 
             float ring = exp(-pow((abs(lat) - 0.46 * hullB)
@@ -418,6 +452,80 @@ export class Ocean {
             gSteep += ring * (0.008 + 0.035 * spf) * wetF;
             gDisp.y += hull + bowSide + wk;
           }
+
+          #if IS_PATCH == 1
+          for (int i = 0; i < WAKE_MAX; i++) {
+            if (i >= uWakeCount) break;
+            vec4 wake = uWake[i];
+            vec4 meta = uWakeMeta[i];
+            vec2 extra = uWakeExtra[i];
+            vec2 wakeForward = normalize(meta.xy);
+            vec2 wakeSide = vec2(-wakeForward.y, wakeForward.x);
+            vec2 wakeRel = gXZ - wake.xy;
+            float wakeAlong = dot(wakeRel, wakeForward);
+            float wakeLat = dot(wakeRel, wakeSide);
+            float wakeSpreadSpeed = max(meta.w, 0.9);
+            float wakeAlongScale = max(extra.x, 0.6);
+            float wakeAlongD = wakeAlong / wakeAlongScale;
+            if (abs(wakeAlongD) < 3.2) {
+              float wakeBeam = max(meta.z, 0.5);
+              float wakeAge = wake.w;
+              float wakeWaveLength = max(extra.y, 1.2);
+              float wakeSpeed = wakeSpreadSpeed;
+              float wakeCrest = wakeBeam * 0.44
+                + wakeSpeed * (wakeAge - 0.08);
+              float wakeSigma = max(wakeBeam * 0.25, 0.34)
+                + min(wakeAge * 0.065, 0.9);
+              float wakeAbsLat = abs(wakeLat);
+              float wakeOuterGap = max(wakeWaveLength * 0.58,
+                                       wakeBeam * 0.65);
+              float wakeCoord = wakeAbsLat - wakeCrest + wakeAlong * 0.38;
+              float ridgeD = wakeCoord / wakeSigma;
+              float ridge = exp(-ridgeD * ridgeD);
+              float ridgeDc = ridge * -2.0 * ridgeD / wakeSigma;
+              float outerSigma = wakeSigma * 1.35;
+              float outerD = (wakeCoord - wakeOuterGap) / outerSigma;
+              float outerWave = exp(-outerD * outerD);
+              float outerDc = outerWave * -2.0 * outerD / outerSigma;
+              float troughWidth = max(wakeBeam * 0.36, 0.34)
+                + wakeAge * 0.04;
+              float troughD = wakeAbsLat / troughWidth;
+              float trough = exp(-troughD * troughD);
+              float troughDa = trough * -2.0 * troughD / troughWidth;
+              float wakeShape = ridge - outerWave * 0.28 - trough * 0.22;
+              float wakeShapeDc = ridgeDc - outerDc * 0.28;
+              float wakeShapeDa = wakeShapeDc - troughDa * 0.22;
+              float wakeAlongGaussian = exp(-wakeAlongD * wakeAlongD);
+              float wakeFrontT = clamp((wakeAlongD + 1.4) / 2.4, 0.0, 1.0);
+              float wakeFrontSmooth = wakeFrontT * wakeFrontT
+                * (3.0 - 2.0 * wakeFrontT);
+              float wakeFrontWeight = 0.22 + 0.78 * wakeFrontSmooth;
+              float wakeFrontDerivative = wakeFrontT > 0.0
+                                           && wakeFrontT < 1.0
+                ? 0.78 * 6.0 * wakeFrontT * (1.0 - wakeFrontT)
+                  / (2.4 * wakeAlongScale)
+                : 0.0;
+              float wakeAlongEnvelope = wakeAlongGaussian * wakeFrontWeight;
+              float wakeAlongDerivative = wakeAlongGaussian
+                * (-2.0 * wakeAlong
+                   / (wakeAlongScale * wakeAlongScale) * wakeFrontWeight
+                   + wakeFrontDerivative);
+              float wakeGain = wake.z
+                * smoothstep(0.08, 0.72, wakeAge)
+                * exp(-wakeAge / 8.5) * 0.35262;
+              float wakeHeight = wakeGain * wakeAlongEnvelope * wakeShape;
+              float wakeDAlong = wakeGain
+                * (wakeShape * wakeAlongDerivative
+                   + wakeAlongEnvelope * wakeShapeDc * 0.38);
+              float wakeDLat = wakeGain * wakeAlongEnvelope * wakeShapeDa
+                * (wakeLat < 0.0 ? -1.0 : 1.0);
+              vec2 wakeSlope = wakeForward * wakeDAlong + wakeSide * wakeDLat;
+              gDisp.y += wakeHeight;
+              gN.xz -= wakeSlope;
+              gSteep += abs(wakeHeight) * 0.08 + length(wakeSlope) * 0.04;
+            }
+          }
+          #endif
 
           {
             float pd = distance(gXZ, uPatchCenter);
@@ -689,6 +797,16 @@ export class Ocean {
       this.uniforms.uWind.value.copy(this._wind);
     }
     this.uniforms.uSteepSum.value = Math.max(this.waveField.totalSteepness, 0.001);
+    const wakeField = this.waveField.wakeField;
+    this.uniforms.uWakeCount.value = wakeField
+      ? wakeField.fillUniforms(
+        focusX,
+        focusZ,
+        this.uniforms.uWake.value,
+        this.uniforms.uWakeMeta.value,
+        this.uniforms.uWakeExtra.value,
+      )
+      : 0;
     const fc = this.farCell;
     this.mesh.position.set(Math.round(focusX / fc) * fc, 0,
                            Math.round(focusZ / fc) * fc);
@@ -706,6 +824,10 @@ export class Ocean {
       this.uniforms.uBoatFroude.value = waterSpeed
         / Math.sqrt(9.81 * boat.spec.length);
       this.uniforms.uBoatWet.value = boat.wet;
+      const yawRate = Math.abs(boat.angVelB?.y || 0);
+      this.uniforms.uBoatTurn.value = THREE.MathUtils.smoothstep(
+        yawRate, 0.06, 0.45,
+      );
       this.uniforms.uBoatSize.value.set(boat.spec.length, boat.spec.beam);
       this.uniforms.uBoatY.value = boat.pos.y;
     }
