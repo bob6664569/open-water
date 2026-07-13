@@ -268,3 +268,19 @@ test('optional fauna and seabed models use the constrained-device decode queue',
 
   assert.deepEqual(violations, [], violations.join('\n'));
 });
+
+test('fauna frame loops reuse species metadata without filter allocations', () => {
+  for (const name of ['birds.js', 'fish.js']) {
+    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    assert.equal(
+      source.match(/Object\.keys\(SPECIES\)/g)?.length,
+      1,
+      `${name} should create its species key list only once`,
+    );
+    assert.doesNotMatch(
+      source,
+      /\.filter\([^\n]*\.key\s*===\s*key/,
+      `${name} should count active species without allocating a filtered array`,
+    );
+  }
+});

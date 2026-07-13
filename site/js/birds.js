@@ -17,6 +17,13 @@ const SPECIES = {
     voice: 'parrot', cry: [2.6, 6.5],
   },
 };
+const SPECIES_KEYS = Object.keys(SPECIES);
+
+function countSpecies(items, key) {
+  let count = 0;
+  for (const item of items) if (item.key === key) count++;
+  return count;
+}
 
 const CRY_RANGE = 260;
 
@@ -160,16 +167,16 @@ export class Birds {
     this.time += dt;
     const preset = this.wf.preset;
     const calm = preset === CALM_PRESET;
-    if (calm && this.time > 1.5) for (const key of Object.keys(SPECIES)) this._load(key);
+    if (calm && this.time > 1.5) for (const key of SPECIES_KEYS) this._load(key);
 
     if (calm) {
-      for (const key of Object.keys(SPECIES)) {
+      for (const key of SPECIES_KEYS) {
         if (!this.protos[key]) continue;
         const sp = SPECIES[key];
         if (this.timers[key] == null) this.timers[key] = rand(1, sp.interval[0]);
         this.timers[key] -= dt;
         if (this.timers[key] <= 0) {
-          if (this.flights.filter(f => f.key === key).length < sp.max) this._spawnFlight(key);
+          if (countSpecies(this.flights, key) < sp.max) this._spawnFlight(key);
           this.timers[key] = rand(sp.interval[0], sp.interval[1]);
         }
       }

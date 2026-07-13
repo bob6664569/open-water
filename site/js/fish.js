@@ -13,6 +13,7 @@ const moveToward = (value, target, maxStep) => value + THREE.MathUtils.clamp(tar
 const FISH_DIR = './assets/animals/fish/';
 const DEPTH = [-2.4, -0.9];
 const DESPAWN = 145;
+const DESPAWN_SQ = DESPAWN * DESPAWN;
 const FISH_FLIP = 0;
 const BOAT_FLEE_R = 8;
 const BOAT_FLEE_STR = 11;
@@ -35,6 +36,13 @@ const SPECIES = {
   swordfish: { file: 'swordfish.glb', clip: 'Fish_Armature|Swimming_Normal', len: 1.5,  tint: null,     girth: 0.48, role: 'solo',   presets: [2], max: 2, interval: [8, 20] },
   shark:     { file: 'shark.glb',     clip: 'Action_Shark Armature', len: 5.6, tint: null, flip: 0, role: 'solo',   presets: [3], max: 1, interval: [10, 24], behavior: 'shark' },
 };
+const SPECIES_KEYS = Object.keys(SPECIES);
+
+function countSpecies(items, key) {
+  let count = 0;
+  for (const item of items) if (item.key === key) count++;
+  return count;
+}
 
 let GUIDED_FALLBACK_ASSETS = null;
 const NOOP_MIXER = Object.freeze({ update() {}, stopAllAction() {} });
@@ -706,19 +714,19 @@ export class FishLife {
   update(dt) {
     this.time += dt;
     const preset = this.wf.preset;
-    for (const key of Object.keys(SPECIES)) {
+    for (const key of SPECIES_KEYS) {
       if (this.time > 1.5 && SPECIES[key].presets.includes(preset)) this._load(key);
     }
     const cam = this.camera.position;
 
-    for (const key of Object.keys(SPECIES)) {
+    for (const key of SPECIES_KEYS) {
       const sp = SPECIES[key];
       if (!this.protos[key] || !sp.presets.includes(preset)) continue;
       if (this.timers[key] == null) this.timers[key] = rand(0.5, sp.interval[0]);
       this.timers[key] -= dt;
       if (this.timers[key] <= 0) {
         const list = sp.role === 'school' ? this.schools : this.solos;
-        if (list.filter(e => e.key === key).length < sp.max) {
+        if (countSpecies(list, key) < sp.max) {
           if (sp.role === 'school') this._spawnSchool(key); else this._spawnSolo(key);
         }
         this.timers[key] = rand(sp.interval[0], sp.interval[1]);
@@ -729,7 +737,7 @@ export class FishLife {
       const s = this.schools[i];
       this._updateSchool(s, dt);
       _v.set(s.center.x - cam.x, 0, s.center.z - cam.z);
-      if (!s.guidedEncounter && (_v.length() > DESPAWN || s.life > 165)) {
+      if (!s.guidedEncounter && (_v.lengthSq() > DESPAWN_SQ || s.life > 165)) {
         for (const m of s.members) { this.scene.remove(m.g); m.mixer.stopAllAction(); }
         this.schools.splice(i, 1);
       }
@@ -738,7 +746,7 @@ export class FishLife {
       const f = this.solos[i];
       this._updateSolo(f, dt);
       _v.set(f.pos.x - cam.x, 0, f.pos.z - cam.z);
-      if (_v.length() > DESPAWN || f.life > 165) {
+      if (_v.lengthSq() > DESPAWN_SQ || f.life > 165) {
         this.scene.remove(f.g); f.mixer.stopAllAction();
         this.solos.splice(i, 1);
       }
