@@ -208,6 +208,12 @@ export const VESSEL_SPECS = {
       filterBase: 380, filterRange: 920, gain: 0.2,
       sampleGain: 0.44, rpmRise: 3.0, rpmFall: 1.8, propGain: 0.9,
     },
+    effects: {
+      roosterTail: {
+        speedStart: 5, speedFull: 18,
+        rate: 0.34, height: 0.58, spread: 0.78, velocity: 0.64, size: 0.58,
+      },
+    },
     waterMask: {
       beamScale: 0.6, bowScale: 0.78, sternScale: 0.86,
       bottom: -0.1, top: 0.32, bowRise: 0.48,
@@ -246,6 +252,12 @@ export const VESSEL_SPECS = {
       filterBase: 340, filterRange: 1050, gain: 0.25,
       sampleGain: 0.5, rpmRise: 2.65, rpmFall: 1.65, propGain: 1.12,
     },
+    effects: {
+      roosterTail: {
+        speedStart: 6, speedFull: 25,
+        rate: 0.42, height: 0.66, spread: 0.84, velocity: 0.7, size: 0.68,
+      },
+    },
     waterMask: {
       beamScale: 0.56, bowScale: 0.82, sternScale: 0.68,
       bottom: -0.12, top: 0.34, bowRise: 0.62,
@@ -277,6 +289,12 @@ export const VESSEL_SPECS = {
       filterBase: 520, filterRange: 1450, gain: 0.18,
       sampleGain: 0.4, rpmRise: 2.8, rpmFall: 2.0,
       throttleExponent: 0.82, propGain: 1.35,
+    },
+    effects: {
+      roosterTail: {
+        speedStart: 4, speedFull: 22,
+        rate: 0.26, height: 0.46, spread: 0.62, velocity: 0.52, size: 0.42,
+      },
     },
     rig: {
       bones: [
@@ -361,6 +379,12 @@ export const VESSEL_SPECS = {
       bank: 'zefiro', idleHz: 52, maxHz: 170,
       filterBase: 410, filterRange: 980, gain: 0.2,
       sampleGain: 0.42, rpmRise: 3.2, rpmFall: 1.9, propGain: 0.95,
+    },
+    effects: {
+      roosterTail: {
+        speedStart: 4.5, speedFull: 13,
+        rate: 0.3, height: 0.52, spread: 0.72, velocity: 0.58, size: 0.52,
+      },
     },
     waterMask: {
       beamScale: 0.78, bowScale: 0.72, sternScale: 0.86,
@@ -493,6 +517,12 @@ export const VESSEL_SPECS = {
       bank: 'zefiro', idleHz: 55, maxHz: 175,
       filterBase: 420, filterRange: 1000, gain: 0.19,
       sampleGain: 0.42, rpmRise: 3.4, rpmFall: 2.0, propGain: 1.0,
+    },
+    effects: {
+      roosterTail: {
+        speedStart: 5, speedFull: 20,
+        rate: 0.4, height: 0.6, spread: 0.82, velocity: 0.66, size: 0.62,
+      },
     },
     waterMask: {
       beamScale: 0.6, bowScale: 0.86, sternScale: 0.86,

@@ -10,6 +10,7 @@ import { Ocean } from './rendering/ocean.js';
 import { BoatEffects } from './rendering/effects.js';
 import { FoamTrail } from './rendering/foamtrail.js';
 import { WeatherEffects } from './rendering/weather.js';
+import { PerceptualEffects } from './rendering/perceptual-effects.js';
 import { WaterPassRenderer } from './rendering/water-pass-renderer.js';
 import { EnvironmentController } from './rendering/environment-controller.js';
 import { createFaunaManager } from './fauna/index.js';
@@ -65,6 +66,7 @@ const audio = new BoatAudio(waveField);
 effects.onExhaustPop = (intensity, position) => audio.exhaustPop(intensity, position);
 const foamTrail = new FoamTrail();
 const weather = new WeatherEffects(scene, camera, waveField, audio);
+const perceptualEffects = new PerceptualEffects({ scene, camera, boat, waveField });
 const fauna = createFaunaManager({ scene, camera, waveField, boat, audio });
 const achievements = new AchievementManager();
 const drive = new DriveController(boat, {
@@ -177,6 +179,7 @@ const composer = new EffectComposer(renderer, composerRT);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(bufSize.clone(), 0.22, 0.55, 1.0);
 composer.addPass(bloom);
+composer.addPass(perceptualEffects.lensPass);
 composer.addPass(new OutputPass());
 ocean.uniforms.uResolution.value.copy(bufSize);
 
@@ -187,7 +190,7 @@ const qualityController = new QualityController({
   waterPasses,
   bloom,
   sunLight,
-  budgetTargets: [boat, ocean, effects, weather, fauna],
+  budgetTargets: [boat, ocean, effects, weather, perceptualEffects, fauna],
   resolutionTarget: ocean.uniforms.uResolution.value,
   achievements,
   elements: {
@@ -288,12 +291,13 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   qualityController.resize();
+  perceptualEffects.resize();
 });
 
 if (new URLSearchParams(location.search).has('debug')) {
   window.openWater = {
     boat, waveField, wakeField, camera, ocean, effects, foamTrail,
-    weather, audio, renderer, achievements,
+    weather, perceptualEffects, audio, renderer, achievements,
     snapCamera: () => cameraController.snap(),
     environmentState: () => ({
       trueWindMps: boat.trueWind.length(),
@@ -332,6 +336,12 @@ renderer.setAnimationLoop(() => {
   environment.positionSky(camera.position);
   audio.update(boat, camera, dt);
   weather.update(dt);
+  perceptualEffects.update(
+    dt,
+    weather.storm,
+    cameraController.mode,
+    effects.cameraSprayExposure(camera.position),
+  );
   fauna.update(dt);
   boatHud.update(boat.speedKn, drive.throttle, drive.wheel);
   environment.positionSunLight(boat.pos);

@@ -10,6 +10,8 @@ function createFixture({ storedMode = null, isTouch = false, reducedMotion = fal
     pos: new THREE.Vector3(10, 2, -4),
     quat: new THREE.Quaternion(),
     vel: new THREE.Vector3(3, 0, 4),
+    slam: 0,
+    slamSpeed: 0,
     spec: {
       length: 20,
       camera: {
@@ -149,12 +151,20 @@ test('updates chase, helm, top and cinematic modes without replacing scratch vec
     controller.look,
     controller.forward,
     controller.direction,
+    controller.stableForward,
+    controller.previousVelocity,
+    controller.acceleration,
+    controller.localAcceleration,
+    controller.inertialLocal,
+    controller.inertialTarget,
+    controller.inertialWorld,
+    controller.inverseBoat,
   ];
 
   controller.setVessel(boat.spec);
   controller.update(1 / 60);
   assertFiniteVector(camera.position);
-  assert.equal(camera.fov, 58.9);
+  assert.ok(camera.fov > 59 && camera.fov < 60);
 
   controller.cycle();
   controller.update(1 / 60);
@@ -176,9 +186,56 @@ test('updates chase, helm, top and cinematic modes without replacing scratch vec
   assert.equal(controller.cinematicTime, 1);
   assert.equal(controller.initialized, true);
   assert.deepEqual(
-    [controller.target, controller.desired, controller.look, controller.forward, controller.direction],
+    [
+      controller.target, controller.desired, controller.look, controller.forward,
+      controller.direction, controller.stableForward, controller.previousVelocity,
+      controller.acceleration, controller.localAcceleration, controller.inertialLocal,
+      controller.inertialTarget, controller.inertialWorld, controller.inverseBoat,
+    ],
     scratch,
   );
+});
+
+test('camera inertia and impact response come from physical acceleration', () => {
+  const { controller, boat } = createFixture();
+  controller.setVessel(boat.spec);
+  controller.update(1 / 60);
+
+  boat.vel.set(3, 0, 13);
+  controller.update(1 / 60);
+  assert.ok(controller.inertialLocal.z < 0, 'forward acceleration should make the camera lag');
+  assert.ok(controller.inertialWorld.length() > 0);
+
+  boat.slam = 1.2;
+  boat.slamSpeed = 8;
+  controller.update(1 / 60);
+  assert.ok(controller.impactVelocity < 0, 'a hull impact should create a bounded downward lag');
+  assert.ok(controller.impactOffset < 0);
+});
+
+test('reduced-motion mode removes inertial camera offsets', () => {
+  const { controller, boat } = createFixture({ reducedMotion: true });
+  controller.setVessel(boat.spec);
+  controller.update(1 / 60);
+  boat.vel.set(15, 3, 30);
+  boat.slam = 2;
+  boat.slamSpeed = 12;
+  controller.update(1 / 60);
+
+  assert.equal(controller.inertialWorld.lengthSq(), 0);
+  assert.equal(controller.impactOffset, 0);
+  assert.equal(controller.impactVelocity, 0);
+});
+
+test('helm gaze retains the horizon while the hull pitches', () => {
+  const { controller, camera, boat } = createFixture({ storedMode: 1 });
+  boat.quat.setFromEuler(new THREE.Euler(0.42, 0, 0.22));
+  controller.update(1 / 60);
+  const hullForward = new THREE.Vector3(0, 0, 1).applyQuaternion(boat.quat);
+  const gaze = camera.getWorldDirection(new THREE.Vector3());
+
+  assert.ok(Math.abs(gaze.y) < Math.abs(hullForward.y) * 0.45);
+  assert.deepEqual(camera.up.toArray(), [0, 1, 0]);
 });
 
 test('storage failures fall back safely without blocking camera use', () => {

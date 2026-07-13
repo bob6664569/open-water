@@ -42,6 +42,27 @@ test('Redline Phantom keeps its drag-racing identity and twin propeller rig', ()
   assert.ok(spec.pitchTargetRad > 0);
 });
 
+test('outboards and jet ski reuse a restrained Redline-style rooster tail', () => {
+  const redline = VESSEL_SPECS.boat.effects.roosterTail;
+  const outboards = ['zefiro', 'assault-boat', 'smolbot', 'zodiac_boat'];
+
+  for (const id of outboards) {
+    const profile = VESSEL_SPECS[id].effects.roosterTail;
+    assert.ok(profile.rate > 0 && profile.rate < redline.rate, `${id} rate must stay restrained`);
+    assert.ok(profile.height > 0 && profile.height < redline.height, `${id} height must stay restrained`);
+    assert.ok(profile.velocity > 0 && profile.velocity < 1, `${id} velocity must stay restrained`);
+    assert.ok(profile.size > 0 && profile.size < 1, `${id} particle size must stay restrained`);
+  }
+
+  const jetSki = VESSEL_SPECS['seadoo-gti'].effects.roosterTail;
+  assert.ok(jetSki.rate < Math.min(...outboards.map(
+    id => VESSEL_SPECS[id].effects.roosterTail.rate,
+  )));
+  assert.ok(jetSki.size < Math.min(...outboards.map(
+    id => VESSEL_SPECS[id].effects.roosterTail.size,
+  )));
+});
+
 test('vessel physics sheets satisfy core numeric invariants', async t => {
   for (const [key, spec] of Object.entries(VESSEL_SPECS)) {
     await t.test(key, () => {

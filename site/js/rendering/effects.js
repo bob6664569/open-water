@@ -300,6 +300,24 @@ class ParticleSystem {
     }
     this._dynamicDirty = true;
   }
+
+  exposureAt(point, radius, weight = 1) {
+    const radiusSq = radius * radius;
+    let density = 0;
+    for (let activeIndex = 0; activeIndex < this.activeCount; activeIndex++) {
+      const i = this.activeIndices[activeIndex];
+      const offset = i * 3;
+      const dx = this.pos[offset] - point.x;
+      const dy = this.pos[offset + 1] - point.y;
+      const dz = this.pos[offset + 2] - point.z;
+      const distanceSq = dx * dx + dy * dy + dz * dz;
+      if (distanceSq >= radiusSq) continue;
+      const falloff = 1 - distanceSq / radiusSq;
+      const particleWeight = 0.35 + Math.min(this.size0[i], 2.5) * 0.26;
+      density += falloff * particleWeight * weight;
+    }
+    return density;
+  }
 }
 
 class PropellerWash {
@@ -732,6 +750,17 @@ export class BoatEffects {
     this.propWash.setBudget(particleScale);
   }
 
+  cameraSprayExposure(position) {
+    const density =
+      this.droplets.exposureAt(position, 1.05, 1.15)
+      + this.mist.exposureAt(position, 2.4, 0.62)
+      + this.turnSheet.exposureAt(position, 1.45, 1.2)
+      + this.turnMist.exposureAt(position, 2.8, 0.72)
+      + this.roosterTail.exposureAt(position, 1.5, 1.3)
+      + this.roosterMist.exposureAt(position, 3.1, 0.78);
+    return THREE.MathUtils.clamp(1 - Math.exp(-density * 0.42), 0, 1);
+  }
+
   _burst(p, right, fwd, base, count, speed) {
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -869,6 +898,8 @@ export class BoatEffects {
     }
     const waterY = this.wf.heightAt(this._v.x, this._v.z);
     const rate = config.rate ?? 1;
+    const velocityScale = config.velocity ?? 1;
+    const sizeScale = config.size ?? 1;
     this._roosterPulseTimer -= dt;
     if (this._roosterPulseTimer <= 0) {
       this._roosterPulseTarget = 0.55 + Math.random() * 1.15;
@@ -883,9 +914,9 @@ export class BoatEffects {
     while (this._roosterAcc >= 1) {
       this._roosterAcc -= 1;
       const core = Math.random() < 0.68;
-      const backward = core
+      const backward = (core
         ? 7 + Math.random() * (8 + energy * 10)
-        : 4 + Math.random() * (14 + energy * 17);
+        : 4 + Math.random() * (14 + energy * 17)) * velocityScale;
       const upward = (3.4 + Math.pow(Math.random(), 0.58) * (7 + energy * 11))
         * (config.height ?? 1) * (0.82 + pulse * 0.18);
       const sideways = ((Math.random() - 0.5) * (core ? 3.2 : 11)
@@ -905,9 +936,9 @@ export class BoatEffects {
         boat.vel.z * 0.07 - this._f.z * backward + this._r.z * sideways,
         1.35 + Math.random() * (0.95 + energy * 1.15),
         (core ? 1.1 + Math.random() * 1.7 : 0.55 + Math.random() * 1.45)
-          * (0.9 + energy * 0.78),
+          * (0.9 + energy * 0.78) * sizeScale,
         core ? 0.25 + Math.random() * 0.24 : 0.14 + Math.random() * 0.2,
-        0.88 + Math.random() * 1.3,
+        (0.88 + Math.random() * 1.3) * sizeScale,
       );
     }
 
@@ -916,7 +947,7 @@ export class BoatEffects {
     while (this._roosterMistAcc >= 1) {
       this._roosterMistAcc -= 1;
       const across = (Math.random() - 0.5) * boat.spec.beam * 0.74;
-      const backward = 4.5 + Math.random() * (8 + energy * 8);
+      const backward = (4.5 + Math.random() * (8 + energy * 8)) * velocityScale;
       const sideways = ((Math.random() - 0.5) * (4 + energy * 8)
         + this._roosterSideBias * 2.2) * (config.spread ?? 1);
       const travel = Math.random();
@@ -931,9 +962,9 @@ export class BoatEffects {
         (2.4 + Math.random() * (4.5 + energy * 5.5)) * (config.height ?? 1),
         boat.vel.z * 0.09 - this._f.z * backward + this._r.z * sideways,
         1.05 + Math.random() * 1.5,
-        (0.72 + Math.random() * 1.45) * (0.86 + energy * 0.34),
+        (0.72 + Math.random() * 1.45) * (0.86 + energy * 0.34) * sizeScale,
         0.045 + Math.random() * 0.075,
-        1.1 + Math.random() * 1.05,
+        (1.1 + Math.random() * 1.05) * sizeScale,
       );
     }
     this._roosterPrevOrigin.copy(this._v);
@@ -1466,8 +1497,6 @@ export class BoatEffects {
           0.45,
         );
       }
-      b.slam = 0;
-      b.slamSpeed = 0;
       this._impactCooldown = 0.24;
       const mistPuffs = 12 + Math.round(energy * 10);
       for (let i = 0; i < mistPuffs; i++) {

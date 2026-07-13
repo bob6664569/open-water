@@ -16,6 +16,7 @@ const ORBIT_MIN = 2.5;
 const ORBIT_MAX = 90;
 const TOP_MIN = 12;
 const TOP_MAX = 320;
+const GRAVITY = 9.81;
 
 function defaultTopDistance(spec) {
   return spec.camera.topDistance
@@ -65,6 +66,17 @@ export class CameraController {
     this.look = new THREE.Vector3();
     this.forward = new THREE.Vector3();
     this.direction = new THREE.Vector3();
+    this.stableForward = new THREE.Vector3();
+    this.previousVelocity = new THREE.Vector3();
+    this.acceleration = new THREE.Vector3();
+    this.localAcceleration = new THREE.Vector3();
+    this.inertialLocal = new THREE.Vector3();
+    this.inertialTarget = new THREE.Vector3();
+    this.inertialWorld = new THREE.Vector3();
+    this.inverseBoat = new THREE.Quaternion();
+    this.impactOffset = 0;
+    this.impactVelocity = 0;
+    this.lastSlam = 0;
 
     this.achievements.recordCamera(this.mode);
   }
@@ -131,11 +143,13 @@ export class CameraController {
 
   snap() {
     this.initialized = false;
+    this._resetPerception();
   }
 
   update(dt) {
     const { boat, camera } = this;
     const forward = this.forward.set(0, 0, 1).applyQuaternion(boat.quat);
+    this._updatePerception(dt);
     if (this.mode !== 2) camera.up.set(0, 1, 0);
 
     if (this.mode === 0) {
@@ -161,7 +175,7 @@ export class CameraController {
       boat.pos.x + Math.sin(angle) * horizontalDistance,
       boat.pos.y + distance * Math.sin(this.orbitPitch) + cameraSpec.chaseHeight,
       boat.pos.z + Math.cos(angle) * horizontalDistance,
-    );
+    ).addScaledVector(this.inertialWorld, 0.72);
     const minY = this.waveField.heightAt(this.desired.x, this.desired.z)
       + Math.max(1.35, cameraSpec.chaseHeight + 0.55);
     if (this.desired.y < minY) this.desired.y = minY;
@@ -174,11 +188,9 @@ export class CameraController {
     this.look.copy(boat.pos).addScaledVector(forward, ahead).y += 1.1 - mobileFramingDrop;
     this.target.lerp(this.look, this.initialized ? 1 - Math.exp(-dt * 8) : 1);
     camera.lookAt(this.target);
-    const fov = Math.min(58 + speed * 0.18, 66);
-    if (Math.abs(camera.fov - fov) > 0.1) {
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-    }
+    const froude = speed / Math.sqrt(GRAVITY * Math.max(boat.spec.length, 1));
+    const speedCue = THREE.MathUtils.smoothstep(froude, 0.1, 0.95);
+    this._setFov(58 + speedCue * 6, dt, 3.4);
     this.initialized = true;
   }
 
@@ -186,13 +198,18 @@ export class CameraController {
     const { boat, camera } = this;
     const cameraSpec = boat.spec.camera;
     boat.worldPoint(cameraSpec.helm, camera.position);
+    camera.position.addScaledVector(this.inertialWorld, 0.38);
+    this.stableForward.set(forward.x, 0, forward.z);
+    if (this.stableForward.lengthSq() < 0.0001) this.stableForward.set(0, 0, 1);
+    this.stableForward.normalize().lerp(forward, this.reducedMotion ? 0.08 : 0.22).normalize();
     this.look.copy(camera.position)
-      .addScaledVector(forward, Math.max(10, boat.spec.length * 1.6)).y -= 0.25;
+      .addScaledVector(this.stableForward, Math.max(10, boat.spec.length * 1.6)).y -= 0.25;
     camera.lookAt(this.look);
     if (camera.fov !== cameraSpec.helmFov) {
       camera.fov = cameraSpec.helmFov;
       camera.updateProjectionMatrix();
     }
+    this.initialized = true;
   }
 
   _updateTop(dt) {
@@ -221,19 +238,18 @@ export class CameraController {
     const turnRate = this.reducedMotion ? 0.018 : 0.055;
     this.cinematicAngle += dt * turnRate;
 
-    const breathe = this.reducedMotion ? 0 : Math.sin(this.cinematicTime * 0.19);
     const baseDistance = Math.max(cameraSpec.chaseDistance * 1.35, boat.spec.length * 0.38);
-    const distance = baseDistance * (1 + breathe * 0.07);
+    const distance = baseDistance;
     const height = Math.max(
       cameraSpec.chaseHeight + 1.25,
-      distance * (0.24 + Math.sin(this.cinematicTime * 0.13 + 0.8) * 0.035),
+      distance * 0.26,
     );
     const worldAngle = heading + this.cinematicAngle;
     this.desired.set(
       boat.pos.x + Math.sin(worldAngle) * distance,
       boat.pos.y + height,
       boat.pos.z + Math.cos(worldAngle) * distance,
-    );
+    ).addScaledVector(this.inertialWorld, 0.55);
     const minY = this.waveField.heightAt(this.desired.x, this.desired.z)
       + Math.max(1.25, cameraSpec.chaseHeight + 0.5);
     if (this.desired.y < minY) this.desired.y = minY;
@@ -251,14 +267,78 @@ export class CameraController {
     this.target.lerp(this.look, this.initialized ? 1 - Math.exp(-dt * 2.4) : 1);
     camera.lookAt(this.target);
 
-    const cinematicFov = 50
-      + (this.reducedMotion ? 0 : Math.sin(this.cinematicTime * 0.11) * 2.2);
-    const nextFov = THREE.MathUtils.damp(camera.fov, cinematicFov, 1.8, dt);
-    if (Math.abs(camera.fov - nextFov) > 0.001) {
-      camera.fov = nextFov;
-      camera.updateProjectionMatrix();
-    }
+    const froude = speed / Math.sqrt(GRAVITY * Math.max(boat.spec.length, 1));
+    const speedCue = THREE.MathUtils.smoothstep(froude, 0.12, 1);
+    this._setFov(50 + speedCue * 2, dt, 1.8);
     this.initialized = true;
+  }
+
+  _resetPerception() {
+    this.previousVelocity.copy(this.boat.vel);
+    this.acceleration.set(0, 0, 0);
+    this.localAcceleration.set(0, 0, 0);
+    this.inertialLocal.set(0, 0, 0);
+    this.inertialTarget.set(0, 0, 0);
+    this.inertialWorld.set(0, 0, 0);
+    this.impactOffset = 0;
+    this.impactVelocity = 0;
+    this.lastSlam = this.boat.slam ?? 0;
+  }
+
+  _updatePerception(dt) {
+    const { boat } = this;
+    if (!this.initialized || dt <= 0 || this.reducedMotion) {
+      this._resetPerception();
+      return;
+    }
+
+    const sampleDt = Math.max(dt, 1 / 240);
+    this.acceleration.copy(boat.vel).sub(this.previousVelocity)
+      .multiplyScalar(1 / sampleDt).clampLength(0, 24);
+    this.previousVelocity.copy(boat.vel);
+    this.inverseBoat.copy(boat.quat).invert();
+    this.localAcceleration.copy(this.acceleration).applyQuaternion(this.inverseBoat);
+
+    const vesselScale = THREE.MathUtils.clamp(boat.spec.length / 20, 0.65, 1.45);
+    this.inertialTarget.set(
+      THREE.MathUtils.clamp(-this.localAcceleration.x * 0.018, -0.2, 0.2),
+      THREE.MathUtils.clamp(-this.localAcceleration.y * 0.012, -0.12, 0.12),
+      THREE.MathUtils.clamp(-this.localAcceleration.z * 0.026, -0.34, 0.34),
+    ).multiplyScalar(vesselScale);
+    this.inertialLocal.set(
+      THREE.MathUtils.damp(this.inertialLocal.x, this.inertialTarget.x, 5.8, dt),
+      THREE.MathUtils.damp(this.inertialLocal.y, this.inertialTarget.y, 6.8, dt),
+      THREE.MathUtils.damp(this.inertialLocal.z, this.inertialTarget.z, 5.2, dt),
+    );
+
+    const slam = boat.slam ?? 0;
+    if (slam > this.lastSlam + 0.12) {
+      const slamSpeed = Math.max(0, boat.slamSpeed ?? 0);
+      this.impactVelocity -= THREE.MathUtils.clamp(
+        0.025 + slam * 0.025 + Math.max(0, slamSpeed - 2.4) * 0.012,
+        0.025,
+        0.16,
+      );
+    }
+    this.lastSlam = slam;
+    this.impactVelocity += (-this.impactOffset * 72 - this.impactVelocity * 13) * dt;
+    this.impactOffset = THREE.MathUtils.clamp(
+      this.impactOffset + this.impactVelocity * dt,
+      -0.18,
+      0.08,
+    );
+
+    this.inertialWorld.copy(this.inertialLocal).applyQuaternion(boat.quat);
+    this.inertialWorld.y += this.impactOffset;
+  }
+
+  _setFov(target, dt, damping) {
+    const next = this.initialized
+      ? THREE.MathUtils.damp(this.camera.fov, target, damping, dt)
+      : target;
+    if (Math.abs(this.camera.fov - next) <= 0.001) return;
+    this.camera.fov = next;
+    this.camera.updateProjectionMatrix();
   }
 
   _beginCinematic() {

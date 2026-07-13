@@ -34,15 +34,26 @@ if (!ISOLATED) {
 function canvasContext() {
   return {
     fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 1,
+    lineCap: 'butt',
+    globalAlpha: 1,
     beginPath() {},
     arc() {},
+    ellipse() {},
     fill() {},
+    stroke() {},
+    moveTo() {},
+    quadraticCurveTo() {},
+    clearRect() {},
+    setTransform() {},
     fillRect() {},
     putImageData() {},
     createImageData: (width, height) => ({
       data: new Uint8ClampedArray(width * height * 4), width, height,
     }),
     createRadialGradient: () => ({ addColorStop() {} }),
+    createLinearGradient: () => ({ addColorStop() {} }),
   };
 }
 
@@ -55,7 +66,7 @@ Object.defineProperties(globalThis, {
     value: {
       body: { appendChild() {} },
       createElement: tag => tag === 'canvas'
-        ? { width: 0, height: 0, getContext: () => canvasContext() }
+        ? { width: 0, height: 0, style: {}, getContext: () => canvasContext() }
         : { style: {} },
     },
   },
@@ -65,6 +76,7 @@ const [
   { Ocean, makeOceanGridGeometry, makeWaterNormalTexture },
   { BoatEffects, turnSpraySpeedBoost },
   { WeatherEffects },
+  { PerceptualEffects },
   { Seabed },
   { FoamTrail },
   { VesselAnimationRig },
@@ -72,6 +84,7 @@ const [
   import('../site/js/rendering/ocean.js'),
   import('../site/js/rendering/effects.js'),
   import('../site/js/rendering/weather.js'),
+  import('../site/js/rendering/perceptual-effects.js'),
   import('../site/js/fauna/seabed.js'),
   import('../site/js/rendering/foamtrail.js'),
   import('../site/js/simulation/vessel-animations.js'),
@@ -273,6 +286,17 @@ test('racer rooster tail emits a dense ballistic core and a separate mist cloud'
 
   assert.ok(effects.roosterTail.activeCount > 50);
   assert.ok(effects.roosterMist.activeCount > 1);
+  const particle = effects.roosterTail.activeIndices[0] * 3;
+  const insidePlume = new THREE.Vector3(
+    effects.roosterTail.pos[particle],
+    effects.roosterTail.pos[particle + 1],
+    effects.roosterTail.pos[particle + 2],
+  );
+  assert.ok(
+    effects.cameraSprayExposure(insidePlume) > 0.2,
+    'a camera inside the rooster tail must register direct spray',
+  );
+  assert.equal(effects.cameraSprayExposure(new THREE.Vector3(100, 100, 100)), 0);
 });
 
 test('turn spray escalates sharply from normal speed to 150-200 knots', () => {
@@ -325,6 +349,16 @@ test('the lateral water wall exists at low speed and scales violently by 175 kno
   assert.ok(fastEffects.turnSheet.activeCount > 30);
   assert.ok(fastEffects.turnMist.activeCount > 4);
   assert.ok(fastEffects.turnViolence > 1);
+  const turnParticle = fastEffects.turnSheet.activeIndices[0] * 3;
+  const insideTurnSheet = new THREE.Vector3(
+    fastEffects.turnSheet.pos[turnParticle],
+    fastEffects.turnSheet.pos[turnParticle + 1],
+    fastEffects.turnSheet.pos[turnParticle + 2],
+  );
+  assert.ok(
+    fastEffects.cameraSprayExposure(insideTurnSheet) > 0.2,
+    'a camera inside a lateral turn sheet must register direct spray',
+  );
 
   const slowBoat = makeBoat(5);
   const slowEffects = new BoatEffects(new THREE.Scene(), waveField, slowBoat);
@@ -435,6 +469,129 @@ test('weather rain runs as a budgeted GPU-instanced simulation', () => {
   weather.setPerformanceBudget({ rainScale: 0 });
   assert.equal(weather.activeDropCount, 400, 'minimum rain density must remain visible');
   assert.equal(weather.rainGeometry.instanceCount, 400);
+});
+
+test('perceptual rain uses one budgeted ripple draw and physically triggered lens spray', () => {
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 4000);
+  camera.position.set(0, 4, 0);
+  camera.lookAt(0, 2, 20);
+  const waveField = {
+    significantWaveHeight: 6,
+    heightAt: (x, z) => Math.sin(x * 0.15 + z * 0.08) * 1.8,
+  };
+  const boat = {
+    pos: new THREE.Vector3(0, 0, 1),
+    vel: new THREE.Vector3(0, 0, 16),
+    slam: 0,
+    slamSpeed: 0,
+    throttle: 1,
+    propWet: 1,
+    steer: 0,
+    _effSteer: 0,
+    angVelB: new THREE.Vector3(),
+    quat: new THREE.Quaternion(),
+    spec: { length: 20, beam: 4 },
+  };
+  const effects = new PerceptualEffects({
+    scene, camera, boat, waveField,
+    viewportWidth: () => 800,
+    viewportHeight: () => 600,
+    devicePixelRatio: () => 2,
+  });
+
+  effects.setPerformanceBudget({ rainScale: 0.3 });
+  assert.equal(effects.activeRippleCount, 28);
+  assert.equal(effects.rippleGeometry.instanceCount, 28);
+  assert.equal(effects.rippleGeometry.attributes.aCenter.count, 96);
+  effects.update(0.25, 1, 1);
+  assert.ok(effects.rippleCursor > 0);
+  assert.equal(effects.ripples.visible, true);
+
+  boat.slam = 1.2;
+  boat.slamSpeed = 8;
+  effects.update(1 / 60, 1, 1);
+  assert.ok(effects.sprayVeil > 0);
+  assert.ok(effects.lensDrops.length > 0);
+  assert.equal(effects.lensCanvas.width, 368, 'lens refraction mask stays below scene resolution');
+
+  effects.lensDrops.length = 0;
+  effects.update(1 / 60, 0, 1, 1);
+  assert.ok(effects.sprayVeil > 0.9, 'a physical spray intersection must veil the lens');
+  assert.ok(
+    effects.lensDrops.filter(drop => drop.kind === 'cameraSpray').length >= 20,
+    'entering a dense spray plume must soak the camera in one moving burst',
+  );
+
+  camera.position.set(0, 5, -15);
+  boat.pos.set(0, 0, 0);
+  boat.vel.set(0, 0, 86);
+  boat.slam = 0;
+  effects.lensDrops.length = 0;
+  effects.update(0.5, 0, 0);
+  assert.ok(effects.sprayVeil > 0.3, 'a chase camera inside a fast rooster tail must get wet');
+  assert.ok(effects.lensDrops.length > 0);
+
+  effects.lensDrops.length = 0;
+  effects.plumeDropAccumulator = 0;
+  boat.propWet = 0;
+  boat.vel.set(0, 0, 18);
+  boat.angVelB.y = 0.24;
+  boat._effSteer = 0.16;
+  waveField.significantWaveHeight = 0.35;
+  for (let i = 0; i < 240; i++) effects.update(1 / 60, 0, 0);
+  assert.ok(
+    effects.lensDrops.some(drop => drop.kind === 'turn'),
+    'turning should throw a few drops even in a calm sea',
+  );
+
+  effects.lensDrops.length = 0;
+  effects.rainDropAccumulator = 0;
+  boat.vel.set(0, 0, 0);
+  boat.angVelB.y = 0;
+  boat._effSteer = 0;
+  waveField.significantWaveHeight = 6;
+  for (let i = 0; i < 240; i++) effects.update(1 / 60, 1, 1);
+  const persistentRain = effects.lensDrops.filter(drop => drop.kind === 'rain');
+  assert.ok(persistentRain.length >= 4, 'storm rain should keep the lens continuously wet');
+
+  effects.lensDrops.length = 0;
+  effects.rainDropAccumulator = 0;
+  waveField.preset = 4;
+  effects.update(1 / 60, 0, 1);
+  const immediateStormRain = effects.lensDrops.filter(drop => drop.kind === 'rain');
+  assert.ok(
+    immediateStormRain.length >= 1 && immediateStormRain.length <= 3,
+    'the Storm preset must begin progressively instead of force-filling a frozen pool',
+  );
+  assert.equal(effects.lensPass.enabled, true, 'Storm must enable the wet-lens pass immediately');
+  const initialStormSeeds = new Set(immediateStormRain.map(drop => drop.seed));
+  const firstStormDrop = immediateStormRain[0];
+  const firstStormY = firstStormDrop.y;
+  for (let i = 0; i < 60; i++) effects.update(1 / 60, 0, 1);
+  assert.ok(
+    !effects.lensDrops.includes(firstStormDrop) || firstStormDrop.y > firstStormY + 0.005,
+    'storm drops must visibly run down the lens or leave the frame',
+  );
+  assert.ok(
+    effects.lensDrops.filter(drop => drop.kind === 'rain').length > immediateStormRain.length,
+    'Storm must add rain over time rather than as one synchronous batch',
+  );
+  for (let i = 0; i < 360; i++) effects.update(1 / 60, 0, 1);
+  assert.ok(
+    effects.lensDrops.some(drop => !initialStormSeeds.has(drop.seed)),
+    'storm coverage must continuously replace expired droplets',
+  );
+
+  effects.lensDrops.length = 0;
+  waveField.preset = 3;
+  effects._spawnLensDrop('rain', 1);
+  const drainingDrop = effects.lensDrops[0];
+  drainingDrop.age = drainingDrop.life * 0.76;
+  const beforeDrainY = drainingDrop.y;
+  effects.update(0.1, 0, 1);
+  assert.ok(drainingDrop.y > beforeDrainY, 'old drops should run down the lens');
+  assert.ok(drainingDrop.fade > 0 && drainingDrop.fade < 1, 'old drops should fade before removal');
 });
 
 test('seabed quality profiles change instance counts without rebuilding meshes', () => {
