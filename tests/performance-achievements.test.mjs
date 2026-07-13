@@ -4,6 +4,7 @@ import {
   ACHIEVEMENT_ENTRIES,
   ACHIEVEMENTS,
   AchievementManager,
+  KONAMI_CODE,
 } from '../site/js/achievements.js';
 
 function installBrowserStubs(search = '') {
@@ -59,6 +60,49 @@ test('the 50-knot milestone unlocks the racing boat', () => {
   assert.equal(milestone.metric, 'bestSpeedKn');
   assert.equal(milestone.reward, 'racer');
   assert.match(milestone.description, /Redline Phantom/);
+});
+
+test('the Konami Code unlocks every achievement in one persisted batch', () => {
+  const manager = Object.create(AchievementManager.prototype);
+  manager.state = { unlocked: {} };
+  manager.konamiIndex = 0;
+  manager.dirty = false;
+  let saves = 0;
+  let renders = 0;
+  const notices = [];
+  manager._save = () => { saves += 1; };
+  manager.render = () => { renders += 1; };
+  manager._enqueueNotice = notice => { notices.push(notice); };
+
+  const rewardEvents = [];
+  const originalDispatchEvent = globalThis.dispatchEvent;
+  const originalCustomEvent = globalThis.CustomEvent;
+  globalThis.CustomEvent = class {
+    constructor(type, init) { this.type = type; this.detail = init?.detail; }
+  };
+  globalThis.dispatchEvent = event => { rewardEvents.push(event); return true; };
+  try {
+    KONAMI_CODE.forEach(key => manager._recordKonamiKey({
+      key,
+      code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+    }));
+  } finally {
+    if (originalDispatchEvent) globalThis.dispatchEvent = originalDispatchEvent;
+    else delete globalThis.dispatchEvent;
+    if (originalCustomEvent) globalThis.CustomEvent = originalCustomEvent;
+    else delete globalThis.CustomEvent;
+  }
+
+  assert.equal(Object.keys(manager.state.unlocked).length, ACHIEVEMENTS.length);
+  assert.equal(saves, 1);
+  assert.equal(renders, 1);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].variant, 'konami');
+  assert.match(notices[0].title, /Captain Mode/);
+  assert.deepEqual(
+    rewardEvents.map(event => event.detail.reward).sort(),
+    [...new Set(ACHIEVEMENTS.map(item => item.reward).filter(Boolean))].sort(),
+  );
 });
 
 test('air-time progress accumulates while airborne without waiting for landing', () => {

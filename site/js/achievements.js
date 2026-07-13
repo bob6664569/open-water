@@ -2,6 +2,11 @@ const STORAGE_KEY = 'ocean-boat:achievements:v1';
 const SAVE_INTERVAL = 2000;
 const UNLOCK_SPACING = 8000;
 const STATE_VERSION = 19;
+export const KONAMI_CODE = Object.freeze([
+  'ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown',
+  'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight',
+  'b', 'a',
+]);
 
 const NM = 1852;
 const MIN_JUMP_SPEED_KN = 5;
@@ -340,6 +345,7 @@ export class AchievementManager {
     this.dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
     this.toastQueue = [];
     this.toastActive = false;
+    this.konamiIndex = 0;
     this.lastFishDispersedObserved = 0;
     this.resetFlight();
     this.resetCircle();
@@ -530,10 +536,36 @@ export class AchievementManager {
       });
     });
     addEventListener('keydown', event => {
+      this._recordKonamiKey(event);
       if (event.code === 'Escape' && this.panel?.getAttribute('aria-hidden') === 'false') {
         this.setPanelOpen(false, true);
       }
     });
+  }
+
+  _recordKonamiKey(event) {
+    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.target?.closest?.('input, textarea, select, [contenteditable="true"]')) {
+      this.konamiIndex = 0;
+      return;
+    }
+
+    const key = typeof event.key === 'string' && event.key
+      ? event.key
+      : event.code?.startsWith('Key') ? event.code.slice(3) : event.code;
+    const token = key?.length === 1 ? key.toLowerCase() : key;
+    const expected = KONAMI_CODE[this.konamiIndex];
+    if (token === expected) {
+      this.konamiIndex += 1;
+      if (this.konamiIndex === KONAMI_CODE.length) {
+        this.konamiIndex = 0;
+        this.unlockAll(true);
+      }
+      return;
+    }
+
+    // An extra ArrowUp can also be the beginning of a fresh attempt.
+    this.konamiIndex = token === KONAMI_CODE[0] ? 1 : 0;
   }
 
   togglePanel(restoreFocus = false) {
@@ -875,6 +907,39 @@ export class AchievementManager {
     return true;
   }
 
+  unlockAll(notify = this.active) {
+    const unlockedAt = Date.now();
+    const unlocked = ACHIEVEMENTS.filter(definition => !this.state.unlocked[definition.id]);
+    unlocked.forEach(definition => { this.state.unlocked[definition.id] = unlockedAt; });
+
+    if (unlocked.length) {
+      this.dirty = true;
+      this._save(true);
+      this.render();
+
+      const rewards = new Set();
+      unlocked.forEach(definition => {
+        if (!definition.reward || rewards.has(definition.reward)) return;
+        rewards.add(definition.reward);
+        dispatchEvent(new CustomEvent('ocean-boat:reward-unlocked', {
+          detail: { reward: definition.reward, achievement: definition.id },
+        }));
+      });
+    }
+
+    if (notify) {
+      this._enqueueNotice({
+        kicker: '\u2191 \u2191 \u2193 \u2193 \u2190 \u2192 \u2190 \u2192 B A',
+        mark: '\u221e',
+        title: 'Captain Mode: Unleashed!',
+        description: 'Every boat. Every sea. Every secret. Yours.',
+        reward: true,
+        variant: 'konami',
+      });
+    }
+    return unlocked.length;
+  }
+
   isRewardUnlocked(reward) {
     return ACHIEVEMENTS.some(item => item.reward === reward && this.state.unlocked[item.id]);
   }
@@ -989,32 +1054,41 @@ export class AchievementManager {
   }
 
   _enqueueToast(definition) {
-    this.toastQueue.push(definition);
+    this._enqueueNotice({ definition });
+  }
+
+  _enqueueNotice(notice) {
+    this.toastQueue.push(notice);
     if (!this.toastActive) this._showNextToast();
   }
 
   _showNextToast() {
-    const definition = this.toastQueue.shift();
-    if (!definition || !this.toastRegion) {
+    const notice = this.toastQueue.shift();
+    const definition = notice?.definition;
+    if (!notice || !this.toastRegion) {
       this.toastActive = false;
       return;
     }
     this.toastActive = true;
-    const entry = ACHIEVEMENT_ENTRIES.find(candidate => candidate.definitions.includes(definition));
-    const index = ACHIEVEMENT_ENTRIES.indexOf(entry) + 1;
-    const kicker = definition.reward
-      ? definition.series
+    const entry = definition
+      ? ACHIEVEMENT_ENTRIES.find(candidate => candidate.definitions.includes(definition))
+      : null;
+    const index = entry ? ACHIEVEMENT_ENTRIES.indexOf(entry) + 1 : 0;
+    const isReward = notice.reward ?? Boolean(definition?.reward);
+    const variant = notice.variant === 'konami' ? ' konami' : '';
+    const kicker = notice.kicker || (definition?.reward
+      ? definition?.series
         ? `${definition.series} · Level ${roman(definition.tier)} · Reward unlocked`
         : 'Special reward'
-      : definition.series ? `${definition.series} · Level ${roman(definition.tier)}` : 'Log entry completed';
+      : definition?.series ? `${definition.series} · Level ${roman(definition.tier)}` : 'Log entry completed');
     const toast = document.createElement('div');
-    toast.className = `achievement-toast${definition.reward ? ' reward' : ''}`;
+    toast.className = `achievement-toast${isReward ? ' reward' : ''}${variant}`;
     toast.innerHTML = `<span class="achievement-toast-mark" aria-hidden="true"></span><span><small></small><strong></strong><em></em></span>`;
-    toast.querySelector('.achievement-toast-mark').textContent = definition.tier
-      ? roman(definition.tier) : String(index).padStart(2, '0');
+    toast.querySelector('.achievement-toast-mark').textContent = notice.mark || (definition?.tier
+      ? roman(definition.tier) : String(index).padStart(2, '0'));
     toast.querySelector('small').textContent = kicker;
-    toast.querySelector('strong').textContent = definition.title;
-    toast.querySelector('em').textContent = definition.description;
+    toast.querySelector('strong').textContent = notice.title || definition?.title || '';
+    toast.querySelector('em').textContent = notice.description || definition?.description || '';
     this.toastRegion.replaceChildren(toast);
     requestAnimationFrame(() => toast.classList.add('visible'));
 

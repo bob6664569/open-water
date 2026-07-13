@@ -219,6 +219,53 @@
     font: 700 7px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .17em; text-transform: uppercase; }
   .achievement-toast strong { display: block; margin-top: 4px; font: italic 400 17px/1 Georgia, "Times New Roman", serif; }
   .achievement-toast em { display: block; margin-top: 5px; color: rgba(224,242,250,.58); font: normal 8px/1.35 "SF Mono", ui-monospace, Menlo, monospace; }
+  .achievement-toast.konami { position: relative; isolation: isolate; overflow: hidden; border-color: rgba(255,218,116,.52);
+    color: #fff9e9; background: radial-gradient(circle at 14% 20%, rgba(255,206,77,.2), transparent 34%),
+      linear-gradient(125deg, rgba(3,19,32,.96), rgba(8,48,63,.94) 58%, rgba(10,27,43,.96));
+    box-shadow: 0 18px 54px rgba(0,0,0,.38), 0 0 34px rgba(79,216,242,.2), inset 0 1px rgba(255,246,197,.24);
+    transform: translateY(-20px) scale(.88) rotate(-2.5deg); }
+  .achievement-toast.konami > * { position: relative; z-index: 2; }
+  .achievement-toast.konami::before { content: ""; position: absolute; z-index: 1; inset: -30% -55%;
+    background: linear-gradient(105deg, transparent 36%, rgba(255,238,172,.46) 48%, rgba(117,231,255,.28) 53%, transparent 64%);
+    opacity: 0; transform: translateX(-48%) rotate(4deg); }
+  .achievement-toast.konami::after { content: "\2726  \00B7  \2727  \00B7  \2726"; position: absolute; z-index: 1; top: 8px; right: 11px;
+    color: rgba(255,224,126,.62); font: 9px/1 Georgia, serif; letter-spacing: .14em; opacity: 0; transform: translateY(-5px); }
+  .achievement-toast.konami.visible { animation: konami-toast-arrive .68s cubic-bezier(.2,1.55,.42,1) both; }
+  .achievement-toast.konami.visible::before { animation: konami-toast-sheen 1.05s var(--ease) .22s 1; }
+  .achievement-toast.konami.visible::after { animation: konami-toast-stars .6s var(--ease) .32s both; }
+  .achievement-toast.konami .achievement-toast-mark { border-color: rgba(255,224,126,.72); color: #ffdf78;
+    background: radial-gradient(circle, rgba(255,221,112,.2), rgba(70,202,231,.08));
+    box-shadow: 0 0 0 3px rgba(255,222,117,.06), 0 0 22px rgba(93,225,249,.25);
+    font: italic 600 22px/1 Georgia, "Times New Roman", serif; }
+  .achievement-toast.konami.visible .achievement-toast-mark { animation: konami-mark-pop .72s cubic-bezier(.2,1.5,.4,1) .08s both; }
+  .achievement-toast.konami small { color: rgba(130,229,249,.78); letter-spacing: .12em; }
+  .achievement-toast.konami strong { color: #fff1bd; text-shadow: 0 0 18px rgba(255,218,103,.2); }
+  .achievement-toast.konami em { color: rgba(229,246,249,.74); }
+  @keyframes konami-toast-arrive {
+    0% { opacity: 0; transform: translateY(-24px) scale(.82) rotate(-4deg); }
+    58% { opacity: 1; transform: translateY(2px) scale(1.035) rotate(1deg); }
+    78% { transform: translateY(-1px) scale(.99) rotate(-.35deg); }
+    100% { opacity: 1; transform: none; }
+  }
+  @keyframes konami-toast-sheen {
+    0% { opacity: 0; transform: translateX(-48%) rotate(4deg); }
+    24% { opacity: 1; }
+    100% { opacity: 0; transform: translateX(48%) rotate(4deg); }
+  }
+  @keyframes konami-toast-stars {
+    0% { opacity: 0; transform: translateY(-5px) scale(.75); }
+    60% { opacity: .9; transform: translateY(1px) scale(1.08); }
+    100% { opacity: .62; transform: none; }
+  }
+  @keyframes konami-mark-pop {
+    0% { opacity: 0; transform: scale(.35) rotate(-160deg); }
+    72% { opacity: 1; transform: scale(1.14) rotate(8deg); }
+    100% { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .achievement-toast.konami.visible, .achievement-toast.konami.visible::before,
+    .achievement-toast.konami.visible::after, .achievement-toast.konami.visible .achievement-toast-mark { animation: none; }
+  }
   #vessel-unlock-alert { position: fixed; z-index: 14; left: 50%; bottom: calc(88px + env(safe-area-inset-bottom, 0px));
     width: min(322px, calc(100vw - 28px)); min-height: 68px; display: grid; grid-template-columns: 46px minmax(0, 1fr);
     align-items: center; gap: 13px; padding: 12px 16px 12px 12px; border: 1px solid rgba(190,233,250,.24); border-radius: 16px;
