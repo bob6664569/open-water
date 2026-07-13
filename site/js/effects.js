@@ -139,6 +139,10 @@ class ParticleSystem {
     this.alpha0 = new Float32Array(max);
     this.grow = new Float32Array(max);
     this.seed = new Float32Array(max);
+    this.activeIndices = new Int32Array(max);
+    this.activeSlot = new Int32Array(max);
+    this.activeSlot.fill(-1);
+    this.activeCount = 0;
     for (let i = 0; i < max; i++) this.pos[i * 3 + 1] = -60;
 
     const geo = new THREE.BufferGeometry();
@@ -158,6 +162,9 @@ class ParticleSystem {
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
     this.points.renderOrder = 4;
+    this._dynamicDirty = false;
+    this._seedDirty = false;
+    this.points.onBeforeRender = () => this._flushGpuUpdates();
     scene.add(this.points);
     this.cursor = 0;
     this.activeLimit = max;
@@ -175,30 +182,67 @@ class ParticleSystem {
   spawn(x, y, z, vx, vy, vz, life, size, alpha, grow = 0) {
     const i = this.cursor;
     this.cursor = (this.cursor + 1) % this.activeLimit;
+    if (this.activeSlot[i] < 0) {
+      this.activeSlot[i] = this.activeCount;
+      this.activeIndices[this.activeCount++] = i;
+    }
     this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
     this.vel[i * 3] = vx; this.vel[i * 3 + 1] = vy; this.vel[i * 3 + 2] = vz;
     this.life[i] = life; this.maxLife[i] = life;
     this.size0[i] = size; this.alpha0[i] = alpha; this.grow[i] = grow;
     this.seed[i] = Math.random();
+    this._dynamicDirty = true;
+    this._seedDirty = true;
+  }
+
+  _removeActiveAt(activeIndex) {
+    const removed = this.activeIndices[activeIndex];
+    const lastIndex = --this.activeCount;
+    this.activeSlot[removed] = -1;
+    if (activeIndex === lastIndex) return;
+    const last = this.activeIndices[lastIndex];
+    this.activeIndices[activeIndex] = last;
+    this.activeSlot[last] = activeIndex;
   }
 
   clear() {
     this.life.fill(0);
     this.size.fill(0);
+    this.activeSlot.fill(-1);
+    this.activeCount = 0;
     for (let i = 0; i < this.max; i++) this.pos[i * 3 + 1] = -60;
+    this._dynamicDirty = true;
+  }
+
+  _flushGpuUpdates() {
     const at = this.points.geometry.attributes;
-    at.position.needsUpdate = true;
-    at.aSize.needsUpdate = true;
+    if (this._dynamicDirty) {
+      at.position.needsUpdate = true;
+      at.aSize.needsUpdate = true;
+      at.aAlpha.needsUpdate = true;
+      this._dynamicDirty = false;
+    }
+    if (this._seedDirty) {
+      at.aSeed.needsUpdate = true;
+      this._seedDirty = false;
+    }
   }
 
   update(dt, wf = null) {
     this.time += dt;
     this.points.material.uniforms.uTime.value = this.time;
+    if (this.activeCount === 0) return;
     const dragK = Math.max(0, 1 - this.drag * dt);
-    for (let i = 0; i < this.activeLimit; i++) {
-      if (this.life[i] <= 0) continue;
+    for (let activeIndex = this.activeCount - 1; activeIndex >= 0; activeIndex--) {
+      const i = this.activeIndices[activeIndex];
       this.life[i] -= dt;
-      if (this.life[i] <= 0) { this.pos[i * 3 + 1] = -60; this.size[i] = 0; continue; }
+      if (this.life[i] <= 0) {
+        this.pos[i * 3 + 1] = -60;
+        this.size[i] = 0;
+        this.alpha[i] = 0;
+        this._removeActiveAt(activeIndex);
+        continue;
+      }
       this.vel[i * 3 + 1] -= this.gravity * dt;
       if (this.turbulence > 0) {
         const age = this.maxLife[i] - this.life[i];
@@ -211,7 +255,8 @@ class ParticleSystem {
       const y = this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
       const z = this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
       if (wf && this.vel[i * 3 + 1] < 0 && y < wf.heightAt(x, z) + 0.03) {
-        this.life[i] = 0; this.pos[i * 3 + 1] = -60; this.size[i] = 0;
+        this.life[i] = 0; this.pos[i * 3 + 1] = -60; this.size[i] = 0; this.alpha[i] = 0;
+        this._removeActiveAt(activeIndex);
         continue;
       }
       const t = this.life[i] / this.maxLife[i];
@@ -220,11 +265,7 @@ class ParticleSystem {
       this.size[i] = this.size0[i] * (1 + this.grow[i] * (1 - t));
       this.alpha[i] = this.alpha0[i] * birth * (t * t * (3 - 2 * t));
     }
-    const at = this.points.geometry.attributes;
-    at.position.needsUpdate = true;
-    at.aSize.needsUpdate = true;
-    at.aAlpha.needsUpdate = true;
-    at.aSeed.needsUpdate = true;
+    this._dynamicDirty = true;
   }
 }
 
@@ -241,6 +282,10 @@ class PropellerWash {
     this.life = new Float32Array(max);
     this.maxLife = new Float32Array(max);
     this.seed = new Float32Array(max);
+    this.activeIndices = new Int32Array(max);
+    this.activeSlot = new Int32Array(max);
+    this.activeSlot.fill(-1);
+    this.activeCount = 0;
     for (let i = 0; i < max; i++) this.pos[i * 3 + 1] = -60;
 
     const geo = new THREE.BufferGeometry();
@@ -260,6 +305,9 @@ class PropellerWash {
     this.points.frustumCulled = false;
     this.points.renderOrder = 3;
     this.points.layers.set(1);
+    this._dynamicDirty = false;
+    this._seedDirty = false;
+    this.points.onBeforeRender = () => this._flushGpuUpdates();
     scene.add(this.points);
     this.activeLimit = max;
   }
@@ -273,10 +321,21 @@ class PropellerWash {
     this.clear();
   }
 
-  clear() { this.life.fill(0); }
+  clear() {
+    this.life.fill(0);
+    this.alpha.fill(0);
+    this.activeSlot.fill(-1);
+    this.activeCount = 0;
+    for (let i = 0; i < this.max; i++) this.pos[i * 3 + 1] = -60;
+    this._dynamicDirty = true;
+  }
 
   spawn(p, flow, right, up, strength) {
     const i = this.cursor++ % this.activeLimit;
+    if (this.activeSlot[i] < 0) {
+      this.activeSlot[i] = this.activeCount;
+      this.activeIndices[this.activeCount++] = i;
+    }
     const a = Math.random() * Math.PI * 2;
     const radius = (0.035 + Math.random() * 0.16) * (0.75 + strength * 0.62);
     const radialX = Math.cos(a), radialY = Math.sin(a);
@@ -294,16 +353,48 @@ class PropellerWash {
     this.seed[i] = Math.random();
     this.size[i] = 0.24 + Math.random() * 0.42 + strength * 0.18;
     this.alpha[i] = 0;
+    this._dynamicDirty = true;
+    this._seedDirty = true;
+  }
+
+  _removeActiveAt(activeIndex) {
+    const removed = this.activeIndices[activeIndex];
+    const lastIndex = --this.activeCount;
+    this.activeSlot[removed] = -1;
+    if (activeIndex === lastIndex) return;
+    const last = this.activeIndices[lastIndex];
+    this.activeIndices[activeIndex] = last;
+    this.activeSlot[last] = activeIndex;
+  }
+
+  _flushGpuUpdates() {
+    const at = this.points.geometry.attributes;
+    if (this._dynamicDirty) {
+      at.position.needsUpdate = true;
+      at.aSize.needsUpdate = true;
+      at.aAlpha.needsUpdate = true;
+      this._dynamicDirty = false;
+    }
+    if (this._seedDirty) {
+      at.aSeed.needsUpdate = true;
+      this._seedDirty = false;
+    }
   }
 
   update(dt) {
     this.time += dt;
     this.points.material.uniforms.uTime.value = this.time;
-    for (let i = 0; i < this.activeLimit; i++) {
-      if (this.life[i] <= 0) continue;
+    if (this.activeCount === 0) return;
+    for (let activeIndex = this.activeCount - 1; activeIndex >= 0; activeIndex--) {
+      const i = this.activeIndices[activeIndex];
       this.life[i] -= dt;
       const o = i * 3;
-      if (this.life[i] <= 0) { this.pos[o + 1] = -60; continue; }
+      if (this.life[i] <= 0) {
+        this.pos[o + 1] = -60;
+        this.alpha[i] = 0;
+        this._removeActiveAt(activeIndex);
+        continue;
+      }
       const age = this.maxLife[i] - this.life[i];
       const phase = this.seed[i] * 37 + age * 8.5;
       this.vel[o] += Math.sin(phase) * 0.22 * dt;
@@ -316,16 +407,16 @@ class PropellerWash {
       this.pos[o + 2] += this.vel[o + 2] * dt;
       const water = this.wf.heightAt(this.pos[o], this.pos[o + 2]);
       if (this.pos[o + 1] > water - 0.015) {
-        this.life[i] = 0; this.pos[o + 1] = -60; this.alpha[i] = 0; continue;
+        this.life[i] = 0; this.pos[o + 1] = -60; this.alpha[i] = 0;
+        this._removeActiveAt(activeIndex);
+        continue;
       }
       const t = this.life[i] / this.maxLife[i];
       const appear = Math.min(age / 0.07, 1);
       this.alpha[i] = appear * Math.min(1, t * 2.5) * (0.3 + this.seed[i] * 0.32);
       this.size[i] *= 1 + dt * 0.12;
     }
-    const at = this.points.geometry.attributes;
-    at.position.needsUpdate = true; at.aSize.needsUpdate = true;
-    at.aAlpha.needsUpdate = true; at.aSeed.needsUpdate = true;
+    this._dynamicDirty = true;
   }
 }
 

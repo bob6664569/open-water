@@ -139,6 +139,59 @@ test('particle budgets scale every pool and its GPU draw range', () => {
   }
 });
 
+test('particle pools track live slots and coalesce GPU buffer uploads', () => {
+  const scene = new THREE.Scene();
+  const waveField = { heightAt: () => -100 };
+  const effects = new BoatEffects(scene, waveField, { spec: { id: 'test' } });
+  const system = effects.droplets;
+  const at = system.points.geometry.attributes;
+  const initialVersions = [at.position, at.aSize, at.aAlpha, at.aSeed]
+    .map(attribute => attribute.version);
+
+  system.update(1 / 60, waveField);
+  system.points.onBeforeRender();
+  assert.deepEqual(
+    [at.position, at.aSize, at.aAlpha, at.aSeed].map(attribute => attribute.version),
+    initialVersions,
+    'idle pools must not upload unchanged buffers',
+  );
+
+  system.setBudget(0.02);
+  for (let i = 0; i < system.activeLimit + 5; i++) {
+    system.spawn(i, 1, 0, 0, -1, 0, 0.1, 1, 1);
+  }
+  assert.equal(system.activeLimit, 32);
+  assert.equal(system.activeCount, system.activeLimit, 'ring overwrites must not duplicate slots');
+
+  system.points.onBeforeRender();
+  const spawnedVersions = [at.position, at.aSize, at.aAlpha, at.aSeed]
+    .map(attribute => attribute.version);
+  assert.deepEqual(spawnedVersions, initialVersions.map(version => version + 1));
+  system.points.onBeforeRender();
+  assert.deepEqual(
+    [at.position, at.aSize, at.aAlpha, at.aSeed].map(attribute => attribute.version),
+    spawnedVersions,
+    'multiple render passes must not repeat the same upload',
+  );
+
+  system.update(0.2, waveField);
+  assert.equal(system.activeCount, 0);
+  assert.ok(system.activeSlot.every(slot => slot === -1));
+  system.points.onBeforeRender();
+  assert.equal(at.aSeed.version, spawnedVersions[3], 'animation must not re-upload seeds');
+
+  const wash = effects.propWash;
+  const zero = new THREE.Vector3();
+  const right = new THREE.Vector3(1, 0, 0);
+  const up = new THREE.Vector3(0, 1, 0);
+  wash.spawn(zero, zero, right, up, 1);
+  assert.equal(wash.activeCount, 1);
+  wash.update(10);
+  assert.equal(wash.activeCount, 0);
+  wash.clear();
+  assert.ok(wash.alpha.every(alpha => alpha === 0));
+});
+
 test('weather rain budget updates CPU work and GPU draw range together', () => {
   const weather = new WeatherEffects(
     new THREE.Scene(), new THREE.PerspectiveCamera(),
