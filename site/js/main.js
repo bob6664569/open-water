@@ -17,7 +17,9 @@ import { PerformanceManager } from './performance.js';
 import { AchievementManager } from './achievements.js';
 import { FirstVoyageGuide } from './first-voyage.js';
 import { BoatHud } from './hud.js';
-import { REFLECTION_LAYER, REFRACTION_LAYER } from './render-layers.js';
+import { DriveController } from './drive-controller.js';
+import { CameraController } from './camera-controller.js';
+import { WaterPassRenderer } from './water-pass-renderer.js';
 
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
@@ -151,6 +153,19 @@ const foamTrail = new FoamTrail();
 const weather = new WeatherEffects(scene, camera, waveField, audio);
 const fauna = createFaunaManager({ scene, camera, waveField, boat, audio });
 const achievements = new AchievementManager();
+const drive = new DriveController(boat, {
+  isTouch: IS_TOUCH,
+  auto: () => location.hash === '#auto',
+});
+const cameraController = new CameraController({
+  camera,
+  boat,
+  waveField,
+  achievements,
+  isTouch: IS_TOUCH,
+  reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+  statusElement: document.getElementById('camera-status'),
+});
 const firstVoyageGuide = new FirstVoyageGuide({
   scene, camera, boat, waveField, achievements,
   fish: fauna.fish,
@@ -176,7 +191,6 @@ const REWARD_VESSELS = [
 const LAST_BOAT_KEY = 'ocean-boat:last-vessel';
 const MEGAYACHT_HORN_KEY = 'ocean-boat:megayacht-horn-played';
 const WAVE_INTENSITY_KEY = 'ocean-boat:wave-intensity';
-const CAM_MODE_KEY = 'ocean-boat:camera-mode';
 const initialLoader = document.getElementById('loading');
 const welcome = document.getElementById('welcome');
 const startButton = document.getElementById('start-experience');
@@ -442,18 +456,6 @@ function rememberWaveIntensity(level) {
   try { localStorage.setItem(WAVE_INTENSITY_KEY, String(level)); } catch {  }
 }
 
-function storedCamMode() {
-  try {
-    const m = Number(localStorage.getItem(CAM_MODE_KEY));
-    return Number.isInteger(m) && m >= 0 && m <= 3 ? m : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function rememberCamMode(mode) {
-  try { localStorage.setItem(CAM_MODE_KEY, String(mode)); } catch {  }
-}
 function updateVesselSelector(spec, direction = 0) {
   boatName.textContent = spec.label;
   boatPosition.textContent = `${String(boatIdx + 1).padStart(2, '0')} / ${String(boatList.length).padStart(2, '0')}`;
@@ -513,9 +515,7 @@ async function loadBoatByIndex(i, { initial = false, direction = 0 } = {}) {
     }
     vesselSelector.setAttribute('aria-busy', 'false');
   }
-  orbitDist = spec.camera.chaseDistance;
-  topDist = defaultTopDist(spec);
-  camInit = false;
+  cameraController.setVessel(spec);
 }
 fetch('./assets/boats/index.json')
   .then(r => r.json())
@@ -564,7 +564,7 @@ new RGBELoader()
     sun.normalize();
     ocean.uniforms.uSunDir.value.copy(sun);
     boat.setStartYaw(startYawFromSun(), true);
-    camInit = false;
+    cameraController.snap();
 
     const fogC = new THREE.Color(
       horizon[0] / hn, horizon[1] / hn, horizon[2] / hn);
@@ -611,86 +611,18 @@ new RGBELoader()
 const sunHolder = new THREE.Group();
 scene.add(sunHolder);
 
-const reflRT = new THREE.WebGLRenderTarget(IS_TOUCH ? 512 : 1024, IS_TOUCH ? 512 : 1024);
-const refrRT = new THREE.WebGLRenderTarget(
-  Math.floor(innerWidth / 2), Math.floor(innerHeight / 2));
-refrRT.depthTexture = new THREE.DepthTexture(
-  Math.floor(innerWidth / 2), Math.floor(innerHeight / 2),
-  THREE.UnsignedIntType);
-refrRT.depthTexture.format = THREE.DepthFormat;
-const mirrorCam = new THREE.PerspectiveCamera();
-mirrorCam.layers.set(REFLECTION_LAYER);
-const reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.05);
-const refrPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.35);
-const biasMatrix = new THREE.Matrix4().set(
-  0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
-const tmpDir = new THREE.Vector3();
-const tmpTarget = new THREE.Vector3();
-let lastReflectionAt = -Infinity;
-let lastRefractionAt = -Infinity;
-
-ocean.uniforms.uReflMap.value = reflRT.texture;
-ocean.uniforms.uRefrMap.value = refrRT.texture;
-ocean.uniforms.uRefrDepth.value = refrRT.depthTexture;
-ocean.uniforms.uCameraNear.value = camera.near;
-ocean.uniforms.uCameraFar.value = camera.far;
-
-function renderWaterPasses(now, quality) {
-  const reflectionDue = quality.reflectionHz <= 0
-    || now - lastReflectionAt >= 1000 / quality.reflectionHz;
-  const refractionDue = quality.refractionHz <= 0
-    || now - lastRefractionAt >= 1000 / quality.refractionHz;
-  if (!reflectionDue && !refractionDue) return;
-  const waterY = waveField.heightAt(boat.pos.x, boat.pos.z);
-  reflPlane.constant = -waterY + 0.05;
-  refrPlane.constant = waterY + 0.35;
-  const oldMask = camera.layers.mask;
-  const oldBg = scene.background;
-  const oldFog = scene.fog;
-  const oldParadiseSkyVisible = paradiseSky.visible;
-  scene.background = null;
-  scene.fog = null;
-  paradiseSky.visible = false;
-  renderer.setClearColor(0x000000, 0);
-
-  if (refractionDue) {
-    camera.layers.set(REFRACTION_LAYER);
-    renderer.clippingPlanes = [refrPlane];
-    renderer.setRenderTarget(refrRT);
-    renderer.clear();
-    renderer.render(scene, camera);
-    camera.layers.mask = oldMask;
-    lastRefractionAt = now;
-  }
-
-  if (reflectionDue) {
-    mirrorCam.position.copy(camera.position);
-    mirrorCam.position.y = 2 * waterY - mirrorCam.position.y;
-    camera.getWorldDirection(tmpDir);
-    tmpTarget.copy(camera.position).add(tmpDir);
-    tmpTarget.y = 2 * waterY - tmpTarget.y;
-    // Reflect the actual camera up vector; a fixed world up degenerates in top view.
-    mirrorCam.up.set(camera.up.x, -camera.up.y, camera.up.z);
-    mirrorCam.lookAt(tmpTarget);
-    mirrorCam.projectionMatrix.copy(camera.projectionMatrix);
-    mirrorCam.updateMatrixWorld();
-    ocean.uniforms.uReflMatrix.value
-      .copy(biasMatrix)
-      .multiply(mirrorCam.projectionMatrix)
-      .multiply(mirrorCam.matrixWorldInverse);
-    renderer.clippingPlanes = [reflPlane];
-    renderer.setRenderTarget(reflRT);
-    renderer.clear();
-    renderer.render(scene, mirrorCam);
-    lastReflectionAt = now;
-  }
-
-  renderer.clippingPlanes = [];
-  renderer.setRenderTarget(null);
-  scene.background = oldBg;
-  scene.fog = oldFog;
-  paradiseSky.visible = oldParadiseSkyVisible;
-}
+const waterPasses = new WaterPassRenderer({
+  renderer,
+  scene,
+  camera,
+  ocean,
+  waveField,
+  boat,
+  paradiseSky,
+  isTouch: IS_TOUCH,
+  width: innerWidth,
+  height: innerHeight,
+});
 
 const bufSize = renderer.getDrawingBufferSize(new THREE.Vector2());
 const composerRT = new THREE.WebGLRenderTarget(bufSize.x, bufSize.y, {
@@ -741,18 +673,10 @@ function applyQuality(quality, force = false) {
     appliedWidth = innerWidth;
     appliedHeight = innerHeight;
   }
-  if (force || !previous || previous.reflectionSize !== quality.reflectionSize) {
-    reflRT.setSize(quality.reflectionSize, quality.reflectionSize);
-    lastReflectionAt = -Infinity;
-  }
-  if (viewportChanged || !previous
-      || previous.refractionScale !== quality.refractionScale) {
-    refrRT.setSize(
-      Math.max(1, Math.floor(innerWidth * quality.refractionScale)),
-      Math.max(1, Math.floor(innerHeight * quality.refractionScale)),
-    );
-    lastRefractionAt = -Infinity;
-  }
+  waterPasses.setQuality(quality, previous, innerWidth, innerHeight, {
+    force,
+    viewportChanged,
+  });
   bloom.enabled = quality.bloom;
   bloom.strength = quality.bloomStrength;
   for (const target of [composer.renderTarget1, composer.renderTarget2]) {
@@ -828,27 +752,16 @@ function updatePerformanceHud(now) {
   ].join('\n');
 }
 
-const keys = new Set();
-
 function resetBoat() {
-  throttle = 0;
-  wheel = 0;
+  drive.resetOutput();
   boat.reset();
   achievements.resetFlight();
   achievements.resetCircle();
-  orbitYaw = 0; orbitPitch = 0.3; topYaw = 0;
-  orbitDist = boat.spec.camera.chaseDistance;
-  topDist = defaultTopDist(boat.spec);
-  camInit = false;
+  cameraController.resetVessel();
   resetGestureDrive();
 }
 function cycleCamera() {
-  camMode = (camMode + 1) % 4;
-  rememberCamMode(camMode);
-  if (camMode === 3) beginCinematicCamera();
-  else camInit = false;
-  achievements.recordCamera(camMode);
-  announceCameraMode();
+  cameraController.cycle();
 }
 function changeBoat(direction) {
   if (boatList.length > 1 && !boatLoader.classList.contains('visible')) {
@@ -865,21 +778,20 @@ function previousBoat() {
 addEventListener('keydown', (e) => {
   if (!appStarted) return;
   audio.start();
-  keys.add(e.code);
+  drive.press(e.code);
   if (e.code === 'KeyR') resetBoat();
   if (e.code === 'KeyC') cycleCamera();
   if (e.code === 'KeyB') e.shiftKey ? previousBoat() : nextBoat();
   if (e.code === 'KeyL') achievements.togglePanel(false);
-  if (e.code === 'Space') throttle = 0;
   const states = { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4 };
   if (states[e.code] !== undefined && seaControlsUnlocked()) {
     setWaveIntensity(states[e.code], { userInitiated: true });
   }
 });
-addEventListener('keyup', (e) => keys.delete(e.code));
-addEventListener('blur', () => { keys.clear(); resetGestureDrive(); });
+addEventListener('keyup', (e) => drive.release(e.code));
+addEventListener('blur', () => { drive.clearInput(); resetGestureDrive(); });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { keys.clear(); resetGestureDrive(); }
+  if (document.hidden) { drive.clearInput(); resetGestureDrive(); }
 });
 
 const gestureDrive = document.getElementById('gesture-drive');
@@ -1065,102 +977,6 @@ syncSeaControlAccess();
 syncVesselSelectorAccess();
 setWaveIntensity(seaControlsUnlocked() ? storedWaveIntensity() : 2);
 
-let throttle = 0;
-let wheel = 0;
-function updateControls(dt) {
-  if (location.hash === '#auto') {
-    const t = waveField.time;
-    throttle = 1;
-    wheel = (t > 6 && t < 30) ? 0.9 : 0;
-    boat.setControls(throttle, wheel);
-    return;
-  }
-  if (gestureState.active) {
-    throttle = gestureState.throttle;
-    wheel = gestureState.steer;
-    boat.setControls(throttle, wheel);
-    return;
-  }
-  const up = keys.has('KeyW') || keys.has('ArrowUp');
-  const dn = keys.has('KeyS') || keys.has('ArrowDown');
-  if (up) throttle = Math.min(throttle + 0.7 * dt, 1);
-  if (dn) throttle = Math.max(throttle - 0.9 * dt, -1);
-  if (IS_TOUCH && !up && !dn) {
-    const returnRate = 4.8 * dt;
-    if (throttle > returnRate) throttle -= returnRate;
-    else if (throttle < -returnRate) throttle += returnRate;
-    else throttle = 0;
-  }
-  const left = keys.has('KeyA') || keys.has('ArrowLeft');
-  const rightK = keys.has('KeyD') || keys.has('ArrowRight');
-  if (rightK && !left) wheel = Math.min(wheel + 2.2 * dt, 1);
-  else if (left && !rightK) wheel = Math.max(wheel - 2.2 * dt, -1);
-  else {
-    const rc = 1.6 * dt;
-    if (wheel > rc) wheel -= rc;
-    else if (wheel < -rc) wheel += rc;
-    else wheel = 0;
-  }
-  boat.setControls(throttle, wheel);
-}
-
-const CAMERA_MODE_NAMES = ['Chase camera', 'Helm camera', 'Top camera', 'Cinematic camera'];
-const reducedCameraMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-let camMode = storedCamMode();
-achievements.recordCamera(camMode);
-let orbitYaw = 0;
-let orbitPitch = 0.3;
-let orbitDist = 12;
-const ORBIT_MIN = 2.5, ORBIT_MAX = 90;
-const TOP_MIN = 12, TOP_MAX = 320;
-let topDist = 60;
-let topYaw = 0;
-let cinematicAngle = Math.PI * 1.18;
-let cinematicTime = 0;
-let cameraStatusTimer = null;
-
-function announceCameraMode() {
-  const status = document.getElementById('camera-status');
-  if (!status) return;
-  status.textContent = CAMERA_MODE_NAMES[camMode];
-  status.classList.remove('visible');
-  requestAnimationFrame(() => status.classList.add('visible'));
-  clearTimeout(cameraStatusTimer);
-  cameraStatusTimer = setTimeout(() => status.classList.remove('visible'), 1400);
-}
-
-function beginCinematicCamera() {
-  const fwd = tmpV.set(0, 0, 1).applyQuaternion(boat.quat);
-  const heading = Math.atan2(fwd.x, fwd.z);
-  camDesired.copy(camera.position).sub(boat.pos);
-  cinematicAngle = Math.atan2(camDesired.x, camDesired.z) - heading;
-  camera.getWorldDirection(tmpV2);
-  camTarget.copy(camera.position).addScaledVector(
-    tmpV2, Math.max(boat.spec.camera.chaseDistance, 10),
-  );
-  cinematicTime = 0;
-  camInit = true;
-}
-function defaultTopDist(spec) {
-  return spec.camera.topDistance
-    ?? spec.camera.chaseDistance * 2 + spec.length * 4;
-}
-function activeZoom() { return camMode === 2 ? topDist : orbitDist; }
-function setActiveZoom(v) {
-  const before = activeZoom();
-  if (camMode === 2) topDist = THREE.MathUtils.clamp(v, TOP_MIN, TOP_MAX);
-  else orbitDist = THREE.MathUtils.clamp(v, ORBIT_MIN, ORBIT_MAX);
-  if ((camMode === 0 || camMode === 2) && Math.abs(activeZoom() - before) > 0.001) {
-    achievements.recordCameraControl('zoom');
-  }
-}
-function orbitHoriz(dx) {
-  if (camMode === 2) topYaw -= dx * 0.006;
-  else orbitYaw -= dx * 0.006;
-  if ((camMode === 0 || camMode === 2) && Math.abs(dx) > 0.1) {
-    achievements.recordCameraControl('orbit');
-  }
-}
 const dragPointers = new Map();
 let pinchStartDist = 0, pinchStartZoom = 0;
 const VIEW_TAP_MAX_DURATION = 280;
@@ -1202,7 +1018,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     dragPointers.forEach(pointer => { pointer.multiTouch = true; });
     const [a, b] = [...dragPointers.values()];
     pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
-    pinchStartZoom = activeZoom();
+    pinchStartZoom = cameraController.activeZoom();
   }
 });
 addEventListener('pointermove', (e) => {
@@ -1214,21 +1030,16 @@ addEventListener('pointermove', (e) => {
     const [a, b] = [...dragPointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
     if (pinchStartDist > 0 && d > 0) {
-      setActiveZoom(pinchStartZoom * pinchStartDist / d);
+      cameraController.setActiveZoom(pinchStartZoom * pinchStartDist / d);
     }
   } else if (gestureState.active && IS_TOUCH) {
-    orbitHoriz(e.clientX - prevX);
-    setActiveZoom(activeZoom() * Math.exp((e.clientY - prevY) * 0.008));
+    cameraController.orbitHoriz(e.clientX - prevX);
+    cameraController.setActiveZoom(
+      cameraController.activeZoom() * Math.exp((e.clientY - prevY) * 0.008),
+    );
   } else {
-    orbitHoriz(e.clientX - prevX);
-    if (camMode !== 2) {
-      const previousPitch = orbitPitch;
-      orbitPitch = THREE.MathUtils.clamp(
-        orbitPitch + (e.clientY - prevY) * 0.004, 0.14, 1.25);
-      if (camMode === 0 && Math.abs(orbitPitch - previousPitch) > 0.0001) {
-        achievements.recordCameraControl('orbit');
-      }
-    }
+    cameraController.orbitHoriz(e.clientX - prevX);
+    cameraController.orbitPitchBy(e.clientY - prevY);
   }
 });
 function endDrag(e) {
@@ -1241,114 +1052,10 @@ addEventListener('pointerup', endDrag);
 addEventListener('pointercancel', endDrag);
 addEventListener('wheel', (e) => {
   if (e.target instanceof Element && e.target.closest('#achievements-panel')) return;
-  setActiveZoom(activeZoom() * Math.exp(e.deltaY * 0.0012));
+  cameraController.setActiveZoom(
+    cameraController.activeZoom() * Math.exp(e.deltaY * 0.0012),
+  );
 }, { passive: true });
-
-const camTarget = new THREE.Vector3();
-const camDesired = new THREE.Vector3();
-const camLook = new THREE.Vector3();
-const tmpV = new THREE.Vector3();
-const tmpV2 = new THREE.Vector3();
-let camInit = false;
-
-function updateCamera(dt) {
-  const fwd = tmpV.set(0, 0, 1).applyQuaternion(boat.quat);
-  if (camMode !== 2) camera.up.set(0, 1, 0);
-  if (camMode === 0) {
-    const speed0 = boat.vel.length();
-    const camSpec = boat.spec.camera;
-    const heading = Math.atan2(fwd.x, fwd.z);
-    const a = heading + Math.PI + orbitYaw;
-    const dist = orbitDist + speed0 * 0.06;
-    const horiz = dist * Math.cos(orbitPitch);
-    camDesired.set(
-      boat.pos.x + Math.sin(a) * horiz,
-      boat.pos.y + dist * Math.sin(orbitPitch) + camSpec.chaseHeight,
-      boat.pos.z + Math.cos(a) * horiz,
-    );
-    const minY = waveField.heightAt(camDesired.x, camDesired.z)
-               + Math.max(1.35, camSpec.chaseHeight + 0.55);
-    if (camDesired.y < minY) camDesired.y = minY;
-    const k = camInit ? 1 - Math.exp(-dt * (3.2 + speed0 * 0.12)) : 1;
-    camera.position.lerp(camDesired, k);
-    const ahead = 5 * Math.max(Math.cos(orbitYaw), 0);
-    const mobileFramingDrop = IS_TOUCH ? camSpec.chaseDistance * 0.065 : 0;
-    camLook.copy(boat.pos).addScaledVector(fwd, ahead).y += 1.1 - mobileFramingDrop;
-    camTarget.lerp(camLook, camInit ? 1 - Math.exp(-dt * 8) : 1);
-    camera.lookAt(camTarget);
-    const fov = Math.min(58 + speed0 * 0.18, 66);
-    if (Math.abs(camera.fov - fov) > 0.1) {
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-    }
-    camInit = true;
-  } else if (camMode === 1) {
-    const camSpec = boat.spec.camera;
-    boat.worldPoint(camSpec.helm, camera.position);
-    camLook.copy(camera.position)
-      .addScaledVector(fwd, Math.max(10, boat.spec.length * 1.6)).y -= 0.25;
-    camera.lookAt(camLook);
-    if (camera.fov !== camSpec.helmFov) {
-      camera.fov = camSpec.helmFov;
-      camera.updateProjectionMatrix();
-    }
-  } else if (camMode === 2) {
-    camDesired.set(boat.pos.x, boat.pos.y + topDist, boat.pos.z);
-    camera.position.lerp(camDesired, camInit ? 1 - Math.exp(-dt * 3.5) : 1);
-    camera.up.set(Math.sin(topYaw), 0, -Math.cos(topYaw));
-    camLook.lerp(boat.pos, camInit ? 1 - Math.exp(-dt * 8) : 1);
-    camera.lookAt(camLook);
-    if (Math.abs(camera.fov - 55) > 0.1) {
-      camera.fov = 55;
-      camera.updateProjectionMatrix();
-    }
-    if (topDist >= TOP_MAX) achievements.recordAntWorld();
-    camInit = true;
-  } else {
-    cinematicTime += dt;
-    const camSpec = boat.spec.camera;
-    const heading = Math.atan2(fwd.x, fwd.z);
-    const turnRate = reducedCameraMotion ? 0.018 : 0.055;
-    cinematicAngle += dt * turnRate;
-
-    const breathe = reducedCameraMotion ? 0 : Math.sin(cinematicTime * 0.19);
-    const baseDist = Math.max(camSpec.chaseDistance * 1.35, boat.spec.length * 0.38);
-    const dist = baseDist * (1 + breathe * 0.07);
-    const height = Math.max(
-      camSpec.chaseHeight + 1.25,
-      dist * (0.24 + Math.sin(cinematicTime * 0.13 + 0.8) * 0.035),
-    );
-    const worldAngle = heading + cinematicAngle;
-    camDesired.set(
-      boat.pos.x + Math.sin(worldAngle) * dist,
-      boat.pos.y + height,
-      boat.pos.z + Math.cos(worldAngle) * dist,
-    );
-    const minY = waveField.heightAt(camDesired.x, camDesired.z)
-               + Math.max(1.25, camSpec.chaseHeight + 0.5);
-    if (camDesired.y < minY) camDesired.y = minY;
-
-    const positionEase = camInit ? 1 - Math.exp(-dt * 0.82) : 1;
-    camera.position.lerp(camDesired, positionEase);
-
-    const speed = boat.vel.length();
-    const ahead = Math.max(1.5, Math.min(boat.spec.length * 0.16, 9) + speed * 0.35);
-    camLook.copy(boat.pos);
-    camLook.x += Math.sin(heading) * ahead;
-    camLook.z += Math.cos(heading) * ahead;
-    camLook.y += Math.max(0.7, boat.spec.length * 0.025);
-    camTarget.lerp(camLook, camInit ? 1 - Math.exp(-dt * 2.4) : 1);
-    camera.lookAt(camTarget);
-
-    const cinematicFov = 50 + (reducedCameraMotion ? 0 : Math.sin(cinematicTime * 0.11) * 2.2);
-    const nextFov = THREE.MathUtils.damp(camera.fov, cinematicFov, 1.8, dt);
-    if (Math.abs(camera.fov - nextFov) > 0.001) {
-      camera.fov = nextFov;
-      camera.updateProjectionMatrix();
-    }
-    camInit = true;
-  }
-}
 
 const elKn = document.getElementById('kn');
 const elThrottle = document.querySelector('#throttle i');
@@ -1364,7 +1071,7 @@ addEventListener('resize', () => {
 if (new URLSearchParams(location.search).has('debug')) {
   window.openWater = {
     boat, waveField, camera, ocean, effects, foamTrail, weather, audio, renderer, achievements,
-    snapCamera: () => { camInit = false; },
+    snapCamera: () => cameraController.snap(),
   };
 }
 
@@ -1385,7 +1092,7 @@ renderer.setAnimationLoop(() => {
   const dt = appStarted ? frameDt : 0;
   waveField.update(dt, boat.pos.x, boat.pos.z);
   updateAtmosphere(dt);
-  updateControls(dt);
+  drive.update(dt, waveField.time, gestureState);
   boat.update(dt);
   achievements.update(dt, boat, waveField, fauna.achievementSources);
   ocean.update(dt, boat.pos.x, boat.pos.z, boat);
@@ -1394,17 +1101,17 @@ renderer.setAnimationLoop(() => {
   ocean.uniforms.uTrailCenter.value.copy(foamTrail.center);
   effects.update(dt);
   sunHolder.position.set(camera.position.x, 0, camera.position.z);
-  updateCamera(dt);
+  cameraController.update(dt);
   firstVoyageGuide.update(dt);
   paradiseSky.position.copy(camera.position);
   audio.update(boat, camera, dt);
   weather.update(dt);
   fauna.update(dt);
-  boatHud.update(boat.speedKn, throttle, wheel);
+  boatHud.update(boat.speedKn, drive.throttle, drive.wheel);
   sunLight.position.copy(boat.pos).addScaledVector(sun, 80);
   sunLight.target.position.copy(boat.pos);
   performanceManager.beginGpu();
-  renderWaterPasses(frameStart, currentQuality);
+  waterPasses.render(frameStart, currentQuality);
   composer.render();
   performanceManager.endGpu();
   performanceManager.endFrame();
