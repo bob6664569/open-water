@@ -14,23 +14,37 @@ export class WeatherEffects {
     this.nextFlash = 5 + Math.random() * 5;
     this.activeDropCount = DROP_COUNT;
 
-    const positions = new Float32Array(DROP_COUNT * 2 * 3);
-    this.dropX = new Float64Array(DROP_COUNT);
-    this.dropY = new Float64Array(DROP_COUNT);
-    this.dropZ = new Float64Array(DROP_COUNT);
-    this.dropSpeed = new Float64Array(DROP_COUNT);
-    this.dropLength = new Float64Array(DROP_COUNT);
+    const origins = new Float32Array(DROP_COUNT * 3);
+    const motion = new Float32Array(DROP_COUNT * 2);
+    const seeds = new Float32Array(DROP_COUNT);
     for (let i = 0; i < DROP_COUNT; i++) {
-      this.dropX[i] = (Math.random() - 0.5) * 120;
-      this.dropY[i] = (Math.random() - 0.5) * 58;
-      this.dropZ[i] = (Math.random() - 0.5) * 120;
-      this.dropSpeed[i] = 27 + Math.random() * 20;
-      this.dropLength[i] = 0.18 + Math.random() * 0.48;
+      const originOffset = i * 3;
+      origins[originOffset] = (Math.random() - 0.5) * 120;
+      origins[originOffset + 1] = (Math.random() - 0.5) * 58;
+      origins[originOffset + 2] = (Math.random() - 0.5) * 120;
+      motion[i * 2] = 27 + Math.random() * 20;
+      motion[i * 2 + 1] = 0.18 + Math.random() * 0.48;
+      seeds[i] = Math.random();
     }
-    this.rainGeometry = new THREE.BufferGeometry();
+    this.rainGeometry = new THREE.InstancedBufferGeometry();
     this.rainGeometry.setAttribute('position', new THREE.BufferAttribute(
-      positions, 3,
-    ).setUsage(THREE.DynamicDrawUsage));
+      new Float32Array([0, 0, 0, 0, 1, 0]), 3,
+    ));
+    this.rainGeometry.setAttribute('aOrigin', new THREE.InstancedBufferAttribute(
+      origins, 3,
+    ));
+    this.rainGeometry.setAttribute('aMotion', new THREE.InstancedBufferAttribute(
+      motion, 2,
+    ));
+    this.rainGeometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(
+      seeds, 1,
+    ));
+    this.rainGeometry.instanceCount = DROP_COUNT;
+    this.rainGeometry.setDrawRange(0, 2);
+    this.rainUniforms = {
+      uRainTime: { value: 0 },
+      uWindOffset: { value: 0 },
+    };
     this.rainMaterial = new THREE.LineBasicMaterial({
       color: 0x9eafba,
       transparent: true,
@@ -39,6 +53,42 @@ export class WeatherEffects {
       blending: THREE.NormalBlending,
       fog: true,
     });
+    this.rainMaterial.onBeforeCompile = shader => {
+      Object.assign(shader.uniforms, this.rainUniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', /* glsl */`
+          #include <common>
+          attribute vec3 aOrigin;
+          attribute vec2 aMotion;
+          attribute float aSeed;
+          uniform float uRainTime;
+          uniform float uWindOffset;
+
+          float rainHash(vec2 value) {
+            return fract(sin(dot(value, vec2(127.1, 311.7))) * 43758.5453);
+          }
+        `)
+        .replace('#include <begin_vertex>', /* glsl */`
+          float rawY = aOrigin.y - aMotion.x * uRainTime;
+          float cycle = max(0.0, floor((29.0 - rawY) / 58.0));
+          float recycled = step(0.5, cycle);
+          float baseX = mix(
+            aOrigin.x, rainHash(vec2(aSeed, cycle)) * 120.0 - 60.0, recycled
+          );
+          float baseZ = mix(
+            aOrigin.z, rainHash(vec2(aSeed + 17.31, cycle)) * 120.0 - 60.0,
+            recycled
+          );
+          float endpoint = position.y;
+          float x = mod(baseX + uWindOffset + 60.0, 120.0) - 60.0;
+          vec3 transformed = vec3(
+            x - endpoint * aMotion.y * 0.42,
+            rawY + cycle * 58.0 + endpoint * aMotion.y,
+            baseZ
+          );
+        `);
+    };
+    this.rainMaterial.customProgramCacheKey = () => 'gpu-rain-v1';
     this.rain = new THREE.LineSegments(this.rainGeometry, this.rainMaterial);
     this.rain.frustumCulled = false;
     this.rain.renderOrder = 8;
@@ -217,7 +267,7 @@ export class WeatherEffects {
 
   setPerformanceBudget({ rainScale = 1 } = {}) {
     this.activeDropCount = Math.max(400, Math.floor(DROP_COUNT * rainScale));
-    this.rainGeometry.setDrawRange(0, this.activeDropCount * 2);
+    this.rainGeometry.instanceCount = this.activeDropCount;
   }
 
   update(dt) {
@@ -241,33 +291,11 @@ export class WeatherEffects {
       this.boltMaterial.opacity = 0;
       return;
     }
-    const p = this.rainGeometry.attributes.position;
-    const positions = p.array;
     const wind = 8 + this.storm * 13;
-    for (let i = 0; i < this.activeDropCount; i++) {
-      let x = this.dropX[i] + wind * dt;
-      let y = this.dropY[i] - this.dropSpeed[i] * dt;
-      let z = this.dropZ[i];
-      if (y < -29) {
-        y += 58;
-        x = (Math.random() - 0.5) * 120;
-        z = (Math.random() - 0.5) * 120;
-      }
-      if (x > 60) x -= 120;
-      this.dropX[i] = x;
-      this.dropY[i] = y;
-      this.dropZ[i] = z;
-      const j = i * 6;
-      positions[j] = x;
-      positions[j + 1] = y;
-      positions[j + 2] = z;
-      positions[j + 3] = x - this.dropLength[i] * 0.42;
-      positions[j + 4] = y + this.dropLength[i];
-      positions[j + 5] = z;
-    }
-    p.clearUpdateRanges();
-    p.addUpdateRange(0, this.activeDropCount * 6);
-    p.needsUpdate = true;
+    this.rainUniforms.uRainTime.value += dt;
+    this.rainUniforms.uWindOffset.value = (
+      this.rainUniforms.uWindOffset.value + wind * dt
+    ) % 120;
 
     if (this.storm > 0.72) {
       this.nextFlash -= dt * this.storm;

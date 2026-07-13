@@ -326,7 +326,7 @@ test('particle pools track live slots and coalesce GPU buffer uploads', () => {
   assert.ok(wash.alpha.every(alpha => alpha === 0));
 });
 
-test('weather rain budget updates CPU work and GPU draw range together', () => {
+test('weather rain runs as a budgeted GPU-instanced simulation', () => {
   const waveField = { significantWaveHeight: 0.35 };
   const weather = new WeatherEffects(
     new THREE.Scene(), new THREE.PerspectiveCamera(),
@@ -335,26 +335,39 @@ test('weather rain budget updates CPU work and GPU draw range together', () => {
 
   weather.setPerformanceBudget({ rainScale: 0.3 });
   assert.equal(weather.activeDropCount, 1560);
-  assert.equal(weather.rainGeometry.drawRange.count, 3120);
-  assert.equal(weather.dropX instanceof Float64Array, true);
-  assert.equal(weather.dropY instanceof Float64Array, true);
-  assert.equal(weather.dropZ instanceof Float64Array, true);
-  assert.equal(
-    weather.rainGeometry.attributes.position.usage,
-    THREE.DynamicDrawUsage,
-  );
+  assert.equal(weather.rainGeometry.isInstancedBufferGeometry, true);
+  assert.equal(weather.rainGeometry.instanceCount, 1560);
+  assert.equal(weather.rainGeometry.drawRange.count, 2);
+  assert.equal(weather.rainGeometry.attributes.aOrigin.count, 5200);
+  assert.equal(weather.rainGeometry.attributes.aMotion.count, 5200);
+  assert.equal(weather.rainGeometry.attributes.aSeed.count, 5200);
+
+  const shader = {
+    uniforms: {},
+    vertexShader: '#include <common>\nvoid main() {\n#include <begin_vertex>\n}',
+  };
+  weather.rainMaterial.onBeforeCompile(shader);
+  assert.equal(shader.uniforms.uRainTime, weather.rainUniforms.uRainTime);
+  assert.equal(shader.uniforms.uWindOffset, weather.rainUniforms.uWindOffset);
+  assert.match(shader.vertexShader, /attribute vec3 aOrigin/);
+  assert.match(shader.vertexShader, /rawY \+ cycle \* 58\.0/);
 
   waveField.significantWaveHeight = 6;
+  const versions = Object.fromEntries(Object.entries(weather.rainGeometry.attributes)
+    .map(([name, attribute]) => [name, attribute.version]));
   weather.update(1);
+  assert.ok(weather.rainUniforms.uRainTime.value > 0);
+  assert.ok(weather.rainUniforms.uWindOffset.value > 8);
   assert.deepEqual(
-    weather.rainGeometry.attributes.position.updateRanges,
-    [{ start: 0, count: weather.activeDropCount * 6 }],
-    'only active rain vertices should be uploaded',
+    Object.fromEntries(Object.entries(weather.rainGeometry.attributes)
+      .map(([name, attribute]) => [name, attribute.version])),
+    versions,
+    'rain animation must not upload geometry buffers',
   );
 
   weather.setPerformanceBudget({ rainScale: 0 });
   assert.equal(weather.activeDropCount, 400, 'minimum rain density must remain visible');
-  assert.equal(weather.rainGeometry.drawRange.count, 800);
+  assert.equal(weather.rainGeometry.instanceCount, 400);
 });
 
 test('seabed quality profiles change instance counts without rebuilding meshes', () => {
