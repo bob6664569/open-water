@@ -15,18 +15,22 @@ export class WeatherEffects {
     this.activeDropCount = DROP_COUNT;
 
     const positions = new Float32Array(DROP_COUNT * 2 * 3);
-    this.drops = [];
+    this.dropX = new Float64Array(DROP_COUNT);
+    this.dropY = new Float64Array(DROP_COUNT);
+    this.dropZ = new Float64Array(DROP_COUNT);
+    this.dropSpeed = new Float64Array(DROP_COUNT);
+    this.dropLength = new Float64Array(DROP_COUNT);
     for (let i = 0; i < DROP_COUNT; i++) {
-      this.drops.push({
-        x: (Math.random() - 0.5) * 120,
-        y: (Math.random() - 0.5) * 58,
-        z: (Math.random() - 0.5) * 120,
-        speed: 27 + Math.random() * 20,
-        length: 0.18 + Math.random() * 0.48,
-      });
+      this.dropX[i] = (Math.random() - 0.5) * 120;
+      this.dropY[i] = (Math.random() - 0.5) * 58;
+      this.dropZ[i] = (Math.random() - 0.5) * 120;
+      this.dropSpeed[i] = 27 + Math.random() * 20;
+      this.dropLength[i] = 0.18 + Math.random() * 0.48;
     }
     this.rainGeometry = new THREE.BufferGeometry();
-    this.rainGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.rainGeometry.setAttribute('position', new THREE.BufferAttribute(
+      positions, 3,
+    ).setUsage(THREE.DynamicDrawUsage));
     this.rainMaterial = new THREE.LineBasicMaterial({
       color: 0x9eafba,
       transparent: true,
@@ -238,21 +242,31 @@ export class WeatherEffects {
       return;
     }
     const p = this.rainGeometry.attributes.position;
+    const positions = p.array;
     const wind = 8 + this.storm * 13;
     for (let i = 0; i < this.activeDropCount; i++) {
-      const drop = this.drops[i];
-      drop.y -= drop.speed * dt;
-      drop.x += wind * dt;
-      if (drop.y < -29) {
-        drop.y += 58;
-        drop.x = (Math.random() - 0.5) * 120;
-        drop.z = (Math.random() - 0.5) * 120;
+      let x = this.dropX[i] + wind * dt;
+      let y = this.dropY[i] - this.dropSpeed[i] * dt;
+      let z = this.dropZ[i];
+      if (y < -29) {
+        y += 58;
+        x = (Math.random() - 0.5) * 120;
+        z = (Math.random() - 0.5) * 120;
       }
-      if (drop.x > 60) drop.x -= 120;
-      const j = i * 2;
-      p.setXYZ(j, drop.x, drop.y, drop.z);
-      p.setXYZ(j + 1, drop.x - drop.length * 0.42, drop.y + drop.length, drop.z);
+      if (x > 60) x -= 120;
+      this.dropX[i] = x;
+      this.dropY[i] = y;
+      this.dropZ[i] = z;
+      const j = i * 6;
+      positions[j] = x;
+      positions[j + 1] = y;
+      positions[j + 2] = z;
+      positions[j + 3] = x - this.dropLength[i] * 0.42;
+      positions[j + 4] = y + this.dropLength[i];
+      positions[j + 5] = z;
     }
+    p.clearUpdateRanges();
+    p.addUpdateRange(0, this.activeDropCount * 6);
     p.needsUpdate = true;
 
     if (this.storm > 0.72) {

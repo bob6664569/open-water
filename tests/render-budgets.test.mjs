@@ -193,14 +193,30 @@ test('particle pools track live slots and coalesce GPU buffer uploads', () => {
 });
 
 test('weather rain budget updates CPU work and GPU draw range together', () => {
+  const waveField = { significantWaveHeight: 0.35 };
   const weather = new WeatherEffects(
     new THREE.Scene(), new THREE.PerspectiveCamera(),
-    { significantWaveHeight: 0.35 }, null,
+    waveField, null,
   );
 
   weather.setPerformanceBudget({ rainScale: 0.3 });
   assert.equal(weather.activeDropCount, 1560);
   assert.equal(weather.rainGeometry.drawRange.count, 3120);
+  assert.equal(weather.dropX instanceof Float64Array, true);
+  assert.equal(weather.dropY instanceof Float64Array, true);
+  assert.equal(weather.dropZ instanceof Float64Array, true);
+  assert.equal(
+    weather.rainGeometry.attributes.position.usage,
+    THREE.DynamicDrawUsage,
+  );
+
+  waveField.significantWaveHeight = 6;
+  weather.update(1);
+  assert.deepEqual(
+    weather.rainGeometry.attributes.position.updateRanges,
+    [{ start: 0, count: weather.activeDropCount * 6 }],
+    'only active rain vertices should be uploaded',
+  );
 
   weather.setPerformanceBudget({ rainScale: 0 });
   assert.equal(weather.activeDropCount, 400, 'minimum rain density must remain visible');
