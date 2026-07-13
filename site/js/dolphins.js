@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { enableWaterPasses } from './render-layers.js';
 
 // Rough-sea escorts arrive only after sustained cruising and remain below local waves.
 const _v = new THREE.Vector3();
@@ -59,7 +60,7 @@ export class Dolphins {
         if (!o.isMesh) return;
         o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.enable(1);
+        enableWaterPasses(o);
       });
     }, (e) => console.warn('[dolphins] load failed', e));
   }

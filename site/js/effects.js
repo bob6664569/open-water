@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { showInRefraction } from './render-layers.js';
 
 export function turnSpraySpeedBoost(forwardSpeed) {
   const highSpeed = THREE.MathUtils.smoothstep(forwardSpeed, 48, 103);
@@ -336,7 +337,7 @@ class PropellerWash {
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
     this.points.renderOrder = 3;
-    this.points.layers.set(1);
+    showInRefraction(this.points);
     this._dynamicDirty = false;
     this._seedDirty = false;
     this.points.onBeforeRender = () => this._flushGpuUpdates();

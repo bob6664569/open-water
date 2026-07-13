@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { IS_CONSTRAINED_DEVICE, loadGLTFDeferred } from './deferred-loader.js';
+import { showInRefraction } from './render-layers.js';
 
 // The calm-water seabed follows the boat and fades radially before the deep ocean.
 const CALM_PRESET = 1;
@@ -252,7 +253,7 @@ export class Seabed {
     };
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.position.y = SAND_Y;
-    this.mesh.layers.set(1);
+    showInRefraction(this.mesh);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -2;
     this.mesh.visible = false;
@@ -277,7 +278,7 @@ export class Seabed {
   _buildReefMesh(kind, geometry, material, count) {
     const mesh = new THREE.InstancedMesh(geometry, material, count);
     mesh.name = `calm-${kind}`;
-    mesh.layers.set(1);
+    showInRefraction(mesh);
     mesh.frustumCulled = false;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
@@ -474,7 +475,7 @@ export class Seabed {
       wrap.add(root);
       wrap.traverse(o => {
         if (!o.isMesh) return;
-        o.layers.set(1);
+        showInRefraction(o);
         o.frustumCulled = false;
         o.castShadow = false;
         if (o.material && o.material.isMeshBasicMaterial) {
@@ -509,7 +510,7 @@ export class Seabed {
       color: tints[(Math.random() * tints.length) | 0], roughness: 0.92, metalness: 0.0,
     });
     const m = new THREE.Mesh(this.starGeoFallback, mat);
-    m.layers.set(1); m.frustumCulled = false; m.castShadow = false;
+    showInRefraction(m); m.frustumCulled = false; m.castShadow = false;
     return m;
   }
 

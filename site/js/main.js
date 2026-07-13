@@ -24,6 +24,7 @@ import { PerformanceManager } from './performance.js';
 import { AchievementManager } from './achievements.js';
 import { FirstVoyageGuide } from './first-voyage.js';
 import { BoatHud } from './hud.js';
+import { REFLECTION_LAYER, REFRACTION_LAYER } from './render-layers.js';
 
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
@@ -605,7 +606,7 @@ refrRT.depthTexture = new THREE.DepthTexture(
   THREE.UnsignedIntType);
 refrRT.depthTexture.format = THREE.DepthFormat;
 const mirrorCam = new THREE.PerspectiveCamera();
-mirrorCam.layers.set(1);
+mirrorCam.layers.set(REFLECTION_LAYER);
 const reflPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.05);
 const refrPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.35);
 const biasMatrix = new THREE.Matrix4().set(
@@ -640,7 +641,7 @@ function renderWaterPasses(now, quality) {
   renderer.setClearColor(0x000000, 0);
 
   if (refractionDue) {
-    camera.layers.set(1);
+    camera.layers.set(REFRACTION_LAYER);
     renderer.clippingPlanes = [refrPlane];
     renderer.setRenderTarget(refrRT);
     renderer.clear();

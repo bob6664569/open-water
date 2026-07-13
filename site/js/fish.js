@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { showInRefraction } from './render-layers.js';
 
 // Underwater fauna render on the refraction layer and react to the boat's future path.
 const _v = new THREE.Vector3();
@@ -126,7 +127,7 @@ export class FishLife {
         if (!o.isMesh) return;
         o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.set(1);
+        showInRefraction(o);
         if (sp.tint != null && o.material) {
           o.material = o.material.clone();
           o.material.color = new THREE.Color(sp.tint);
@@ -166,7 +167,7 @@ export class FishLife {
         o.geometry = filtered;
         o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.set(1);
+        showInRefraction(o);
         triangleCount += filtered.index.count / 3;
       });
       if (!triangleCount) continue;
@@ -358,8 +359,8 @@ export class FishLife {
       const g = new THREE.Group();
       const bodyMesh = new THREE.Mesh(body, material);
       const tailMesh = new THREE.Mesh(tail, material);
-      bodyMesh.layers.set(1);
-      tailMesh.layers.set(1);
+      showInRefraction(bodyMesh);
+      showInRefraction(tailMesh);
       g.add(bodyMesh, tailMesh);
       g.scale.setScalar(rand(1.35, 1.9));
       const angle = rand(0, Math.PI * 2);

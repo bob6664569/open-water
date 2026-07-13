@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { showInRefraction } from './render-layers.js';
 
 // The model's nearly square bounds make automatic heading detection unreliable.
 const _v = new THREE.Vector3();
@@ -60,7 +61,7 @@ export class Mantas {
         if (!o.isMesh) return;
         o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.set(1);
+        showInRefraction(o);
       });
     }, (e) => console.warn('[manta] load failed', e));
   }

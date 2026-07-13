@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VESSEL_SPECS } from './vessels.js';
 import { VesselAnimationRig } from './vessel-animations.js';
+import { enableWaterPasses } from './render-layers.js';
 
 const G = 9.81;
 const DEBUG_WATER_MASK = new URLSearchParams(window.location.search).has('masks');
@@ -257,7 +258,7 @@ export class Boat {
           const override = this.spec.materialColors?.[m.name];
           if (override !== undefined && m.color) m.color.setHex(override);
           o.castShadow = true;
-          o.layers.enable(1);
+          enableWaterPasses(o);
         }
       });
       repairOpaqueMaterialRegions(model, this.spec.materialRepairs);
@@ -324,7 +325,7 @@ export class Boat {
       if (!this.model) {
         const fb = buildFallbackBoat();
         fb.traverse(o => {
-          if (o.isMesh) { o.castShadow = true; o.layers.enable(1); }
+          if (o.isMesh) { o.castShadow = true; enableWaterPasses(o); }
         });
         this.group.add(fb);
         this.model = fb;

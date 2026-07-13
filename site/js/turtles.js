@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { showInRefraction } from './render-layers.js';
 
 // The rig faces -Z even though its extended flippers make X the longest bound.
 const _v = new THREE.Vector3();
@@ -59,7 +60,7 @@ export class Turtles {
         if (!o.isMesh) return;
         o.frustumCulled = false;
         o.castShadow = false;
-        o.layers.set(1);
+        showInRefraction(o);
       });
     }, (e) => console.warn('[turtles] load failed', e));
   }
