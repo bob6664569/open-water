@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { showInRefraction } from './render-layers.js';
+import { sampleBoatThreat } from './fauna-math.js';
 
 // Underwater fauna render on the refraction layer and react to the boat's future path.
 const _v = new THREE.Vector3();
@@ -93,6 +94,7 @@ export class FishLife {
     this.dispersedSchools = 0;
     this.timers = {};
     this.loading = new Set();
+    this.threat = { ax: 0, az: 0, u: 0 };
   }
 
   _load(key) {
@@ -484,21 +486,9 @@ export class FishLife {
   }
 
   _boatThreat(px, pz, radius = BOAT_FLEE_R) {
-    const b = this.boat;
-    if (!b) return null;
-    const vx = b.vel ? b.vel.x : 0, vz = b.vel ? b.vel.z : 0;
-    const v2 = vx * vx + vz * vz;
-    let cx, cz;
-    if (v2 > 1) {
-      let ts = ((px - b.pos.x) * vx + (pz - b.pos.z) * vz) / v2;
-      ts = Math.max(0, Math.min(BOAT_LEAD, ts));
-      cx = b.pos.x + vx * ts; cz = b.pos.z + vz * ts;
-    } else { cx = b.pos.x; cz = b.pos.z; }
-    let dx = px - cx, dz = pz - cz, cd = Math.hypot(dx, dz);
-    if (cd >= radius) return null;
-    if (cd < 0.4 && v2 > 1) { const vn = Math.sqrt(v2); dx = -vz / vn; dz = vx / vn; cd = 1; }
-    const inv = 1 / (cd || 1e-3);
-    return { ax: dx * inv, az: dz * inv, u: 1 - cd / radius };
+    return sampleBoatThreat(this.boat, px, pz, radius, this.threat, BOAT_LEAD)
+      ? this.threat
+      : null;
   }
 
   _updateSchool(s, dt) {

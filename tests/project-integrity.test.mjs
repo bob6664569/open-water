@@ -284,3 +284,19 @@ test('fauna frame loops reuse species metadata without filter allocations', () =
     );
   }
 });
+
+test('fauna frame loops avoid temporary threat objects and square-root distance checks', () => {
+  for (const name of [
+    'birds.js', 'dolphins.js', 'fish.js', 'manta.js',
+    'turtles.js', 'whale.js', 'wildlife.js',
+  ]) {
+    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    assert.doesNotMatch(source, /_v\.length\(\)|\.distanceTo\(/, name);
+  }
+
+  for (const name of ['fish.js', 'manta.js', 'turtles.js']) {
+    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    assert.doesNotMatch(source, /return \{ ax:/, `${name} allocates a threat result`);
+    assert.match(source, /sampleBoatThreat\(/, `${name} must use the shared threat sampler`);
+  }
+});

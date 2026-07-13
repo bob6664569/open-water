@@ -4,7 +4,6 @@ import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { enableWaterPasses } from './render-layers.js';
 
 // Rough-sea escorts arrive only after sustained cruising and remain below local waves.
-const _v = new THREE.Vector3();
 const rand = (a, b) => a + Math.random() * (b - a);
 
 const DOLPHIN_PRESETS = new Set([3]);
@@ -15,6 +14,7 @@ const SPEED_BAND = [10, 20];
 const TRIGGER_SUSTAIN = 4;
 const DROP_GRACE = 3.5;
 const ESCORT_MAX = 85;
+const ESCORT_RANGE_SQ = 55 * 55;
 const SUB_MIN = 1.0;
 const SUB_RANGE = [1.4, 6.5];
 const SWIM_MAX = [10, 15];
@@ -40,6 +40,7 @@ export class Dolphins {
     this.inBand = 0;
     this.outBand = 0;
     this.forward = new THREE.Vector3(0, 0, 1);
+    this.right = new THREE.Vector3(1, 0, 0);
 
     this.proto = null;
     this.baseScale = 1;
@@ -86,12 +87,13 @@ export class Dolphins {
       this.forward.set(b.vel.x, 0, b.vel.z).normalize();
     }
     const f = this.forward;
-    return { f, r: _v.set(f.z, 0, -f.x) };
+    this.right.set(f.z, 0, -f.x);
   }
 
   _spawnPod() {
     const b = this.boat;
-    const { f, r } = this._frame();
+    this._frame();
+    const f = this.forward, r = this.right;
     const rx = r.x, rz = r.z;
     const n = Math.round(rand(3, 5));
     const members = [];
@@ -123,7 +125,8 @@ export class Dolphins {
     pod.life += dt;
     const b = this.boat;
     const t = this.time;
-    const { f, r } = this._frame();
+    this._frame();
+    const f = this.forward, r = this.right;
     const fx = f.x, fz = f.z, rx = r.x, rz = r.z;
 
     let allGone = true;
@@ -157,7 +160,7 @@ export class Dolphins {
       orientTo(d.g, vx, vy, vz);
       const swim = 1 + Math.min(2, Math.hypot(vx, vz) / Math.max(dt, 1e-3) * 0.1);
       d.mixer.update(dt * swim);
-      if (d.pos.distanceTo(b.pos) < 55) allGone = false;
+      if (d.pos.distanceToSquared(b.pos) < ESCORT_RANGE_SQ) allGone = false;
     }
 
     if (pod.leaving && allGone) {

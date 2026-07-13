@@ -12,6 +12,7 @@ const TARGET_LEN = 20;
 const MODEL_FLIP = 0;
 const SPAWN = [80, 140];
 const DESPAWN = 185;
+const DESPAWN_SQ = DESPAWN * DESPAWN;
 const EMERGE = 0.35;
 const BLOW_FWD = 0.30;
 
@@ -275,7 +276,7 @@ export class Whales {
     }
 
     _v.set(w.pos.x - this.camera.position.x, 0, w.pos.z - this.camera.position.z);
-    if (_v.length() > DESPAWN || w.life > w.maxLife + 6) {
+    if (_v.lengthSq() > DESPAWN_SQ || w.life > w.maxLife + 6) {
       this.scene.remove(w.g); w.mixer.stopAllAction();
       this.whale = null;
       this.foam.hide();

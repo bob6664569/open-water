@@ -8,6 +8,8 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const angLerp = (a, t, k) => a + Math.atan2(Math.sin(t - a), Math.cos(t - a)) * k;
 
 const CALM_PRESET = 1;
+const DESPAWN_NORMAL_SQ = 620 * 620;
+const DESPAWN_LEAVING_SQ = 380 * 380;
 
 const SPECIES = {
   macaw: {
@@ -188,13 +190,13 @@ export class Birds {
       const fl = this.flights[i];
       this._updateFlight(fl, dt, !calm);
       _v.set(fl.center.x - cam.x, 0, fl.center.z - cam.z);
-      const dist = _v.length();
+      const distanceSq = _v.lengthSq();
 
       if (canCry && !fl.leaving) {
         const sp = SPECIES[fl.key];
         fl.cryTimer -= dt;
         if (fl.cryTimer <= 0) {
-          if (dist < CRY_RANGE) {
+          if (distanceSq < CRY_RANGE * CRY_RANGE) {
             const m = fl.members[(Math.random() * fl.members.length) | 0];
             this.audio.birdCall(sp.voice, m.g.position);
           }
@@ -202,8 +204,8 @@ export class Birds {
         }
       }
 
-      const limit = fl.leaving ? 380 : 620;
-      if (dist > limit || fl.life > 120) {
+      const limitSq = fl.leaving ? DESPAWN_LEAVING_SQ : DESPAWN_NORMAL_SQ;
+      if (distanceSq > limitSq || fl.life > 120) {
         for (const m of fl.members) { this.scene.remove(m.g); m.mixer.stopAllAction(); }
         this.flights.splice(i, 1);
       }

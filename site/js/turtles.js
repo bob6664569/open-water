@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { loadGLTFDeferred } from './deferred-loader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
 import { showInRefraction } from './render-layers.js';
+import { sampleBoatThreat } from './fauna-math.js';
 
 // The rig faces -Z even though its extended flippers make X the longest bound.
 const _v = new THREE.Vector3();
@@ -15,6 +16,7 @@ const MODEL_YAW = Math.PI;
 const DEPTH = [-4.2, -1.5];
 const SPAWN = [58, 96];
 const DESPAWN = 150;
+const DESPAWN_SQ = DESPAWN * DESPAWN;
 const MAX_N = 2;
 const INTERVAL = [12, 30];
 const BOAT_FLEE_R = 9;
@@ -45,6 +47,7 @@ export class Turtles {
     this.baseScale = 1;
     this.yaw = 0;
     this.loadStarted = false;
+    this.threat = { ax: 0, az: 0, u: 0 };
   }
 
   _load() {
@@ -100,21 +103,9 @@ export class Turtles {
   }
 
   _boatThreat(px, pz) {
-    const b = this.boat;
-    if (!b) return null;
-    const vx = b.vel ? b.vel.x : 0, vz = b.vel ? b.vel.z : 0;
-    const v2 = vx * vx + vz * vz;
-    let cx, cz;
-    if (v2 > 1) {
-      let ts = ((px - b.pos.x) * vx + (pz - b.pos.z) * vz) / v2;
-      ts = Math.max(0, Math.min(BOAT_LEAD, ts));
-      cx = b.pos.x + vx * ts; cz = b.pos.z + vz * ts;
-    } else { cx = b.pos.x; cz = b.pos.z; }
-    let dx = px - cx, dz = pz - cz, cd = Math.hypot(dx, dz);
-    if (cd >= BOAT_FLEE_R) return null;
-    if (cd < 0.4 && v2 > 1) { const vn = Math.sqrt(v2); dx = -vz / vn; dz = vx / vn; cd = 1; }
-    const inv = 1 / (cd || 1e-3);
-    return { ax: dx * inv, az: dz * inv, u: 1 - cd / BOAT_FLEE_R };
+    return sampleBoatThreat(this.boat, px, pz, BOAT_FLEE_R, this.threat, BOAT_LEAD)
+      ? this.threat
+      : null;
   }
 
   _update(f, dt) {
@@ -157,7 +148,7 @@ export class Turtles {
       const f = this.turtles[i];
       this._update(f, dt);
       _v.set(f.pos.x - cam.x, 0, f.pos.z - cam.z);
-      if (_v.length() > DESPAWN || f.life > 180) {
+      if (_v.lengthSq() > DESPAWN_SQ || f.life > 180) {
         this.scene.remove(f.g); f.mixer.stopAllAction();
         this.turtles.splice(i, 1);
       }

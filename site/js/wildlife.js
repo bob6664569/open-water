@@ -295,7 +295,7 @@ export class Wildlife {
       this._updateGull(b, dt, flee);
       const limit = b.fleeing ? this.fleeRadius : this.despawnRadius;
       _v.set(b.pos.x - cam.x, 0, b.pos.z - cam.z);
-      if (!b.guidedCenter && (_v.length() > limit || b.life > 90)) {
+      if (!b.guidedCenter && (_v.lengthSq() > limit * limit || b.life > 90)) {
         this.scene.remove(b.g);
         if (b.mixer) b.mixer.stopAllAction();
         this.gulls.splice(i, 1);
