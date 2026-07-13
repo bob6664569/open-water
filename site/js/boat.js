@@ -432,17 +432,21 @@ export class Boat {
     const vVert = relCenter.dot(up);
 
     let wet = 0;
+    const combinedSample = typeof this.wf.sampleSurface === 'function';
     for (const bp of S.buoyPoints) {
       const wp = this.worldPoint(bp.p, s[0]);
-      const depth = this.wf.heightAt(wp.x, wp.z) - wp.y;
+      const surfaceY = combinedSample
+        ? this.wf.sampleSurface(wp.x, wp.z, s[3], s[5])
+        : this.wf.heightAt(wp.x, wp.z);
+      const depth = surfaceY - wp.y;
       if (depth <= 0) continue;
       wet += bp.w * Math.min(depth / S.restDraft, 1);
       const d = Math.min(depth / S.restDraft, S.maxDepthFactor);
       const r = s[1].copy(wp).sub(this.pos);
       const pointVel = s[2].crossVectors(omegaW, r).add(this.vel);
-      const waterVel = this.wf.velocityAt(wp.x, wp.z, s[3]);
+      const waterVel = combinedSample ? s[3] : this.wf.velocityAt(wp.x, wp.z, s[3]);
       const relPoint = s[4].copy(pointVel).sub(waterVel);
-      const waveNormal = this.wf.normalAt(wp.x, wp.z, s[5]);
+      const waveNormal = combinedSample ? s[5] : this.wf.normalAt(wp.x, wp.z, s[5]);
       const hydroNormal = s[6].set(
         waveNormal.x * S.wavePush,
         Math.max(waveNormal.y, 0.32),
@@ -455,7 +459,7 @@ export class Boat {
         this.slam = Math.min(this.slam + 0.45, 2);
         if (impactSpeed > this.slamSpeed) {
           this.slamSpeed = impactSpeed;
-          this.slamPoint.set(wp.x, this.wf.heightAt(wp.x, wp.z), wp.z);
+          this.slamPoint.set(wp.x, surfaceY, wp.z);
           this.slamNormal.copy(waveNormal);
         }
       }

@@ -59,3 +59,64 @@ test('wave queries remain finite and normals stay normalized', () => {
   assert.ok(Math.abs(normal.length() - 1) < 1e-12);
   assert.equal(field.uniformData().count, 16);
 });
+
+test('period changes preserve every component phase at the boat anchor', () => {
+  const field = new WaveField();
+  const anchor = { x: 137.25, z: -82.75 };
+  const phasesBefore = field.waves.map(wave => (
+    wave.k * (wave.dx * anchor.x + wave.dz * anchor.z) + wave.phase
+  ));
+  field.peakPeriod *= 1.35;
+
+  field._syncSpectrum(0, anchor.x, anchor.z);
+
+  field.waves.forEach((wave, index) => {
+    const phaseAfter = wave.k * (wave.dx * anchor.x + wave.dz * anchor.z) + wave.phase;
+    const delta = Math.atan2(
+      Math.sin(phaseAfter - phasesBefore[index]),
+      Math.cos(phaseAfter - phasesBefore[index]),
+    );
+    assert.ok(Math.abs(delta) < 1e-12, `wave ${index} phase jumped at the anchor`);
+  });
+});
+
+test('uniform containers stay stable while their values update in place', () => {
+  const field = new WaveField();
+  const before = field.uniformData();
+  const directions = before.dirs;
+  const amplitudes = before.amps;
+  const firstDirection = directions[0];
+  const firstAmplitude = amplitudes[0];
+
+  field.setSeaPreset(4);
+  field.update(0.5, 25, -10);
+  const after = field.uniformData();
+
+  assert.equal(after.dirs, directions);
+  assert.equal(after.amps, amplitudes);
+  assert.equal(after.dirs[0], firstDirection);
+  assert.equal(after.amps[0], firstAmplitude);
+  assert.ok(after.amps.every(value => [value.x, value.y, value.z].every(Number.isFinite)));
+});
+
+test('combined surface samples match the independent physics queries', () => {
+  const field = new WaveField();
+  field.setSeaPreset(4);
+  field.update(0.73, 140, -95);
+  const positions = [
+    [0, 0], [12.5, -7.25], [140, -95], [-800.2, 1200.75],
+  ];
+
+  for (const [x, z] of positions) {
+    const expectedHeight = field.heightAt(x, z);
+    const expectedVelocity = field.velocityAt(x, z, new THREE.Vector3());
+    const expectedNormal = field.normalAt(x, z, new THREE.Vector3());
+    const velocity = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    const height = field.sampleSurface(x, z, velocity, normal);
+
+    assert.ok(Math.abs(height - expectedHeight) < 1e-12, `height mismatch at ${x},${z}`);
+    assert.ok(velocity.distanceTo(expectedVelocity) < 1e-12, `velocity mismatch at ${x},${z}`);
+    assert.ok(normal.distanceTo(expectedNormal) < 1e-12, `normal mismatch at ${x},${z}`);
+  }
+});

@@ -206,6 +206,49 @@ export class WaveField {
     return out.set(nx, ny, nz).normalize();
   }
 
+  sampleSurface(x, z, velocityOut, normalOut) {
+    // heightAt() uses three inverse-displacement iterations while velocityAt()
+    // and normalAt() use two. Share the first two iterations and the expensive
+    // trigonometric evaluation at that material point without changing either
+    // numerical model.
+    let px = x, pz = z;
+    for (let i = 0; i < 2; i++) {
+      this.displacement(px, pz, this._tmp);
+      px = x - this._tmp.x;
+      pz = z - this._tmp.z;
+    }
+
+    let dx = 0, dz = 0;
+    let vx = 0, vy = 0, vz = 0;
+    let nx = 0, ny = 1, nz = 0;
+    for (const w of this.waves) {
+      const phi = w.k * (w.dx * px + w.dz * pz) + w.phase;
+      const c = Math.cos(phi), si = Math.sin(phi);
+      const qa = w.Q * w.A;
+      dx += qa * w.dx * c;
+      dz += qa * w.dz * c;
+      const orbital = qa * w.omega * si;
+      vx += orbital * w.dx;
+      vz += orbital * w.dz;
+      vy -= w.A * w.omega * c;
+      const ka = w.k * w.A;
+      nx -= w.dx * ka * c;
+      nz -= w.dz * ka * c;
+      ny -= w.Q * ka * si;
+    }
+    velocityOut.set(vx, vy, vz);
+    normalOut.set(nx, ny, nz).normalize();
+
+    px = x - dx;
+    pz = z - dz;
+    let height = 0;
+    for (const w of this.waves) {
+      const phi = w.k * (w.dx * px + w.dz * pz) + w.phase;
+      height += w.A * Math.sin(phi);
+    }
+    return height;
+  }
+
   steepnessSum(count = this.waves.length) {
     let sum = 0;
     for (let i = 0; i < Math.min(count, this.waves.length); i++) {

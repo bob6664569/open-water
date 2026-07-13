@@ -23,6 +23,69 @@ function filesUnder(directory) {
   });
 }
 
+function readGlb(file) {
+  const bytes = readFileSync(file);
+  const chunks = new Map();
+  for (let offset = 12; offset + 8 <= bytes.length;) {
+    const length = bytes.readUInt32LE(offset);
+    const type = bytes.readUInt32LE(offset + 4);
+    chunks.set(type, bytes.subarray(offset + 8, offset + 8 + length));
+    offset += 8 + length;
+  }
+  const jsonChunk = chunks.get(0x4e4f534a);
+  assert.ok(jsonChunk, `${relative(ROOT, file)} has no JSON chunk`);
+  return {
+    json: JSON.parse(jsonChunk.toString('utf8')),
+    binary: chunks.get(0x004e4942),
+  };
+}
+
+function jpegDimensions(bytes) {
+  if (bytes.readUInt16BE(0) !== 0xffd8) return null;
+  const startOfFrame = new Set([
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,
+    0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+  ]);
+  let offset = 2;
+  while (offset + 8 < bytes.length) {
+    while (offset < bytes.length && bytes[offset] !== 0xff) offset++;
+    while (offset < bytes.length && bytes[offset] === 0xff) offset++;
+    const marker = bytes[offset++];
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    if (offset + 2 > bytes.length) break;
+    const length = bytes.readUInt16BE(offset);
+    if (startOfFrame.has(marker) && offset + 7 < bytes.length) {
+      return { height: bytes.readUInt16BE(offset + 3), width: bytes.readUInt16BE(offset + 5) };
+    }
+    if (length < 2) break;
+    offset += length;
+  }
+  return null;
+}
+
+function imageDimensions(bytes, mimeType) {
+  if (mimeType === 'image/png') {
+    assert.equal(bytes.toString('hex', 0, 8), '89504e470d0a1a0a', 'invalid PNG signature');
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (mimeType === 'image/jpeg') return jpegDimensions(bytes);
+  return null;
+}
+
+function embeddedImageDimensions(file) {
+  const { json, binary } = readGlb(file);
+  return (json.images || []).map((image, index) => {
+    assert.ok(Number.isInteger(image.bufferView), `${basename(file)} image ${index} must be embedded`);
+    assert.ok(binary, `${basename(file)} has embedded images but no binary chunk`);
+    const view = json.bufferViews[image.bufferView];
+    const start = view.byteOffset || 0;
+    const data = binary.subarray(start, start + view.byteLength);
+    const dimensions = imageDimensions(data, image.mimeType);
+    assert.ok(dimensions, `${basename(file)} image ${index} uses unsupported ${image.mimeType}`);
+    return dimensions;
+  });
+}
+
 test('all first-party JavaScript modules pass Node syntax checking', async t => {
   for (const file of firstPartyModules()) {
     await t.test(file.slice(ROOT.length + 1), () => {
@@ -154,4 +217,54 @@ test('every GLB is structurally valid, inventoried and redistributable', () => {
   assert.deepEqual(invalid, [], `Invalid GLB containers:\n${invalid.join('\n')}`);
   assert.deepEqual(missingNotices, [], `GLBs missing from THIRD_PARTY_NOTICES.md:\n${missingNotices.join('\n')}`);
   assert.deepEqual(forbiddenLicenses, [], `Non-redistributable GLB licenses:\n${forbiddenLicenses.join('\n')}`);
+});
+
+test('boats with oversized embedded textures have safe mobile variants', () => {
+  const boats = resolve(SITE, 'assets/boats');
+  const mobileBoats = resolve(SITE, 'assets/boats-mobile');
+  const unsafe = [];
+
+  for (const name of readdirSync(boats).filter(file => extname(file) === '.glb')) {
+    const desktopDimensions = embeddedImageDimensions(resolve(boats, name));
+    if (!desktopDimensions.some(({ width, height }) => Math.max(width, height) > 1024)) continue;
+    const mobilePath = resolve(mobileBoats, name);
+    if (!existsSync(mobilePath)) {
+      unsafe.push(`${name}: missing mobile variant`);
+      continue;
+    }
+    const mobileDimensions = embeddedImageDimensions(mobilePath);
+    if (mobileDimensions.length !== desktopDimensions.length) {
+      unsafe.push(`${name}: mobile variant changed the embedded image count`);
+    }
+    mobileDimensions.forEach(({ width, height }, index) => {
+      if (Math.max(width, height) > 1024) {
+        unsafe.push(`${name}: mobile image ${index} is ${width}x${height}`);
+      }
+    });
+  }
+
+  assert.deepEqual(unsafe, [], `Unsafe mobile boat assets:\n${unsafe.join('\n')}`);
+});
+
+test('optional fauna and seabed models use the constrained-device decode queue', () => {
+  const deferredModules = [
+    'birds.js', 'dolphins.js', 'fish.js', 'manta.js',
+    'seabed.js', 'turtles.js', 'whale.js', 'wildlife.js',
+  ];
+  const violations = [];
+
+  for (const name of deferredModules) {
+    const source = readFileSync(resolve(JS_DIR, name), 'utf8');
+    if (!source.includes("from './deferred-loader.js'")) {
+      violations.push(`${name}: deferred loader import missing`);
+    }
+    if (!source.includes('loadGLTFDeferred(')) {
+      violations.push(`${name}: no deferred model load`);
+    }
+    if (/\bnew\s+GLTFLoader\b|\.loadAsync\s*\(/.test(source)) {
+      violations.push(`${name}: bypasses the constrained-device decode queue`);
+    }
+  }
+
+  assert.deepEqual(violations, [], violations.join('\n'));
 });

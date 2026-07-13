@@ -10,7 +10,7 @@
     "lint:html": "html-validate site/index.html",
     "test": "node --disable-warning=ExperimentalWarning --test --import ./tests/register-three.mjs",
     "test:coverage": "node --disable-warning=ExperimentalWarning --experimental-test-coverage --test-coverage-exclude='site/vendor/**' --test-coverage-exclude='tests/**' --test-coverage-lines=60 --test-coverage-branches=50 --test-coverage-functions=50 --test --import ./tests/register-three.mjs",
-    "check": "npm run lint && npm run test:coverage"
+    "check": "npm run lint && npm test && npm run test:coverage"
   },
   "engines": {
     "node": ">=22"
