@@ -881,6 +881,7 @@ export class AchievementManager {
 
   render() {
     this.lastRender = performance.now();
+    const listScrollTop = this.list?.scrollTop || 0;
     const unlockedIds = Object.keys(this.state.unlocked);
     const milestoneCount = unlockedIds.length;
     const discoveredCount = ACHIEVEMENT_ENTRIES.filter(entry => (
@@ -982,6 +983,9 @@ export class AchievementManager {
       fragment.append(item);
     });
     this.list.replaceChildren(fragment);
+    // Replacing every entry can make browser scroll anchoring nudge an open
+    // journal a few pixels on each live progress refresh.
+    this.list.scrollTop = listScrollTop;
   }
 
   _enqueueToast(definition) {
