@@ -23,6 +23,7 @@ import { getVesselSpec } from './vessels.js';
 import { PerformanceManager } from './performance.js';
 import { AchievementManager } from './achievements.js';
 import { FirstVoyageGuide } from './first-voyage.js';
+import { BoatHud } from './hud.js';
 
 document.addEventListener('selectstart', (event) => event.preventDefault());
 
@@ -1336,13 +1337,7 @@ function updateCamera(dt) {
 const elKn = document.getElementById('kn');
 const elThrottle = document.querySelector('#throttle i');
 const elRudder = document.querySelector('#rudder i');
-function updateHUD() {
-  elKn.textContent = boat.speedKn.toFixed(1);
-  elThrottle.style.width = `${Math.abs(throttle) * 100}%`;
-  elThrottle.classList.toggle('reverse', throttle < 0);
-  elRudder.style.width = '4px';
-  elRudder.style.marginLeft = `${(0.5 + wheel * 0.5) * 136}px`;
-}
+const boatHud = new BoatHud(elKn, elThrottle, elRudder);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -1396,7 +1391,7 @@ renderer.setAnimationLoop(() => {
   turtles.update(dt);
   mantas.update(dt);
   birds.update(dt);
-  updateHUD();
+  boatHud.update(boat.speedKn, throttle, wheel);
   sunLight.position.copy(boat.pos).addScaledVector(sun, 80);
   sunLight.target.position.copy(boat.pos);
   performanceManager.beginGpu();
