@@ -62,7 +62,7 @@ Object.defineProperties(globalThis, {
 });
 
 const [
-  { Ocean, makeWaterNormalTexture },
+  { Ocean, makeOceanGridGeometry, makeWaterNormalTexture },
   { BoatEffects, turnSpraySpeedBoost },
   { WeatherEffects },
   { Seabed },
@@ -84,6 +84,32 @@ test('streamed water-normal generation stays bit-identical', () => {
   texture.dispose();
 });
 
+test('adaptive ocean grid preserves coverage while reducing distant triangles', () => {
+  const profiles = [192, 320, 512, 768];
+  let previousTriangles = 0;
+  for (const segments of profiles) {
+    const geometry = makeOceanGridGeometry(2200, segments, true);
+    geometry.computeBoundingBox();
+    const triangles = geometry.index.count / 3;
+    assert.ok(triangles > previousTriangles);
+    assert.ok(triangles < segments * segments, 'LOD must remove over half the far triangles');
+    assert.deepEqual(geometry.boundingBox.min.toArray(), [-1100, 0, -1100]);
+    assert.deepEqual(geometry.boundingBox.max.toArray(), [1100, 0, 1100]);
+    const [columns, rows] = geometry.userData.gridSize;
+    assert.equal(geometry.attributes.position.count, columns * rows);
+    assert.equal(geometry.index.count, (columns - 1) * (rows - 1) * 6);
+    assert.ok(geometry.userData.snapCell <= 2200 / segments);
+    const position = geometry.attributes.position;
+    const firstTriangle = [0, 1, 2].map(offset => (
+      new THREE.Vector3().fromBufferAttribute(position, geometry.index.array[offset])
+    ));
+    const normal = new THREE.Triangle(...firstTriangle).getNormal(new THREE.Vector3());
+    assert.ok(normal.y > 0.999, 'ocean triangles must remain front-facing from above');
+    previousTriangles = triangles;
+    geometry.dispose();
+  }
+});
+
 test('ocean budgets replace geometry only when segment counts change', () => {
   const waveField = new WaveField();
   const ocean = new Ocean(waveField, { oceanFarSegments: 8, oceanPatchSegments: 4 });
@@ -98,7 +124,7 @@ test('ocean budgets replace geometry only when segment counts change', () => {
 
   assert.equal(ocean.farSegments, 10);
   assert.equal(ocean.patchSegments, 6);
-  assert.equal(ocean.mesh.geometry.attributes.position.count, 11 * 11);
+  assert.ok(ocean.mesh.geometry.attributes.position.count < 11 * 11);
   assert.equal(ocean.patch.geometry.attributes.position.count, 7 * 7);
   assert.equal(farDisposed, true);
   assert.equal(patchDisposed, true);

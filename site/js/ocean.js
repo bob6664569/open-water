@@ -7,6 +7,93 @@ const FAR_SEGS = 768;
 const PATCH_SIZE = 92;
 const PATCH_SEGS = 320;
 const FAR_VTX_WAVES = 10;
+const FAR_NEAR_RATIO = 120 / FAR_SIZE;
+const FAR_MID_RATIO = 420 / FAR_SIZE;
+
+function gridAxis(size, segments, adaptive) {
+  const half = size * 0.5;
+  const baseCell = size / segments;
+  if (!adaptive) {
+    return {
+      coordinates: Float32Array.from(
+        { length: segments + 1 }, (_, i) => -half + i * baseCell,
+      ),
+      snapCell: baseCell,
+    };
+  }
+
+  const near = size * FAR_NEAR_RATIO;
+  const mid = size * FAR_MID_RATIO;
+  const bands = [
+    [-half, -mid, 3],
+    [-mid, -near, 2],
+    [-near, near, 1],
+    [near, mid, 2],
+    [mid, half, 3],
+  ];
+  const coordinates = [-half];
+  let snapCell = baseCell;
+  for (const [start, end, scale] of bands) {
+    const count = Math.max(1, Math.ceil((end - start) / (baseCell * scale)));
+    const cell = (end - start) / count;
+    if (scale === 1) snapCell = cell;
+    for (let i = 1; i <= count; i++) coordinates.push(start + cell * i);
+  }
+  return { coordinates: Float32Array.from(coordinates), snapCell };
+}
+
+export function makeOceanGridGeometry(size, segments, adaptive = false) {
+  const xAxis = gridAxis(size, segments, adaptive);
+  const zAxis = gridAxis(size, segments, adaptive);
+  const columns = xAxis.coordinates.length;
+  const rows = zAxis.coordinates.length;
+  const vertexCount = columns * rows;
+  const positions = new Float32Array(vertexCount * 3);
+  const normals = new Float32Array(vertexCount * 3);
+  const uvs = new Float32Array(vertexCount * 2);
+  let vertex = 0;
+  for (let row = 0; row < rows; row++) {
+    const z = zAxis.coordinates[row];
+    for (let column = 0; column < columns; column++) {
+      const x = xAxis.coordinates[column];
+      const p = vertex * 3;
+      positions[p] = x;
+      positions[p + 2] = z;
+      normals[p + 1] = 1;
+      const uv = vertex * 2;
+      uvs[uv] = x / size + 0.5;
+      uvs[uv + 1] = z / size + 0.5;
+      vertex++;
+    }
+  }
+
+  const IndexArray = vertexCount > 65535 ? Uint32Array : Uint16Array;
+  const indices = new IndexArray((columns - 1) * (rows - 1) * 6);
+  let index = 0;
+  for (let row = 0; row < rows - 1; row++) {
+    for (let column = 0; column < columns - 1; column++) {
+      const a = row * columns + column;
+      const b = a + 1;
+      const c = a + columns;
+      const d = c + 1;
+      indices[index++] = a;
+      indices[index++] = c;
+      indices[index++] = b;
+      indices[index++] = b;
+      indices[index++] = c;
+      indices[index++] = d;
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.userData.snapCell = xAxis.snapCell;
+  geometry.userData.gridSize = [columns, rows];
+  return geometry;
+}
 
 const NOISE_GLSL = /* glsl */`
   float ob_hash(vec2 p) {
@@ -179,7 +266,7 @@ export class Ocean {
 
     const farSegments = quality.oceanFarSegments || FAR_SEGS;
     const patchSegments = quality.oceanPatchSegments || PATCH_SEGS;
-    const farGeo = this._makeGeometry(FAR_SIZE, farSegments);
+    const farGeo = this._makeGeometry(FAR_SIZE, farSegments, true);
     const patchGeo = this._makeGeometry(PATCH_SIZE, patchSegments);
 
     this.mesh = new THREE.Mesh(farGeo, this._makeMaterial(false));
@@ -192,14 +279,12 @@ export class Ocean {
 
     this.farSegments = farSegments;
     this.patchSegments = patchSegments;
-    this.farCell = FAR_SIZE / farSegments;
+    this.farCell = farGeo.userData.snapCell;
     this.patchCell = PATCH_SIZE / patchSegments;
   }
 
-  _makeGeometry(size, segments) {
-    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
-    geometry.rotateX(-Math.PI / 2);
-    return geometry;
+  _makeGeometry(size, segments, adaptive = false) {
+    return makeOceanGridGeometry(size, segments, adaptive);
   }
 
   setPerformanceBudget({ oceanFarSegments, oceanPatchSegments } = {}) {
@@ -208,13 +293,13 @@ export class Ocean {
         && oceanPatchSegments === this.patchSegments) return;
     const oldFar = this.mesh.geometry;
     const oldPatch = this.patch.geometry;
-    this.mesh.geometry = this._makeGeometry(FAR_SIZE, oceanFarSegments);
+    this.mesh.geometry = this._makeGeometry(FAR_SIZE, oceanFarSegments, true);
     this.patch.geometry = this._makeGeometry(PATCH_SIZE, oceanPatchSegments);
     oldFar.dispose();
     oldPatch.dispose();
     this.farSegments = oceanFarSegments;
     this.patchSegments = oceanPatchSegments;
-    this.farCell = FAR_SIZE / oceanFarSegments;
+    this.farCell = this.mesh.geometry.userData.snapCell;
     this.patchCell = PATCH_SIZE / oceanPatchSegments;
   }
 
