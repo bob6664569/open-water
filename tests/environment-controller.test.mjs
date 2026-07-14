@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import {
   analyzeHdrTexture,
+  cloudinessForWaveHeight,
   EnvironmentController,
 } from '../site/js/rendering/environment-controller.js';
 
@@ -83,6 +84,17 @@ test('HDR analysis finds the sun and tone-maps the sampled horizon', () => {
   assert.ok(Math.abs(fogColor.b - 0.2) < 1e-12);
 });
 
+test('cloud cover follows every sea preset and clamps beyond the authored range', () => {
+  assert.equal(cloudinessForWaveHeight(0), 0);
+  assert.equal(cloudinessForWaveHeight(0.35), 0);
+  assert.equal(cloudinessForWaveHeight(0.9), 0.24);
+  assert.equal(cloudinessForWaveHeight(2.4), 0.62);
+  assert.equal(cloudinessForWaveHeight(5.2), 1);
+  assert.equal(cloudinessForWaveHeight(20), 1);
+  assert.ok(cloudinessForWaveHeight(1.5) > 0.24);
+  assert.ok(cloudinessForWaveHeight(1.5) < 0.62);
+});
+
 test('loads the device HDR, synchronizes sun consumers and releases PMREM work', () => {
   const fixture = createFixture({ isTouch: true });
   const { environment, texture, loaderCalls, scene, sunSprite, pmremTexture } = fixture;
@@ -125,6 +137,8 @@ test('atmosphere transitions reuse state and retain calm-only sky behavior', () 
   waveField.significantWaveHeight = 8;
   waveField.preset = 1;
   const fogScratch = environment.atmosphereFogColor;
+  const cloudOffset = environment.cloudOffset;
+  const initialCloudiness = environment.cloudiness;
 
   environment.updateAtmosphere(1);
   assert.ok(renderer.toneMappingExposure < 0.85);
@@ -135,7 +149,75 @@ test('atmosphere transitions reuse state and retain calm-only sky behavior', () 
   assert.ok(scene.fog.far < 640);
   assert.ok(sunSprite.material.opacity < 1);
   assert.ok(environment.paradiseSkyMaterial.uniforms.uCalm.value > 0);
+  assert.ok(environment.cloudiness < initialCloudiness);
+  assert.equal(environment.paradiseSkyMaterial.uniforms.uCloudiness.value,
+    environment.cloudiness);
+  assert.equal(environment.cloudOffset, cloudOffset);
   assert.equal(environment.atmosphereFogColor, fogScratch);
+});
+
+test('clouds build in a crescendo, drift with wind and clear completely in Paradise', () => {
+  const { environment, waveField } = createFixture();
+  const ocean = {
+    uniforms: {
+      uCloudiness: { value: 0 },
+      uCloudOffset: { value: new THREE.Vector2() },
+      uCloudShadowStrength: { value: 0 },
+    },
+  };
+  environment.ocean = ocean;
+  environment.cloudiness = 0;
+  waveField.windSpeed = 10;
+  waveField.windDirection = Math.PI / 2;
+
+  waveField.preset = 2;
+  waveField.significantWaveHeight = 0.9;
+  for (let i = 0; i < 8; i++) environment.updateAtmosphere(0.5);
+  const rolling = environment.cloudiness;
+  assert.ok(rolling > 0.22 && rolling < 0.25);
+  assert.ok(Math.abs(environment.cloudOffset.x) < 1e-12);
+  assert.ok(environment.cloudOffset.y > 0);
+
+  waveField.preset = 3;
+  waveField.significantWaveHeight = 2.4;
+  for (let i = 0; i < 8; i++) environment.updateAtmosphere(0.5);
+  const rough = environment.cloudiness;
+  assert.ok(rough > rolling);
+
+  waveField.preset = 4;
+  waveField.significantWaveHeight = 5.2;
+  for (let i = 0; i < 10; i++) environment.updateAtmosphere(0.5);
+  assert.ok(environment.cloudiness > rough);
+  assert.ok(ocean.uniforms.uCloudShadowStrength.value > 0.7);
+
+  waveField.preset = 1;
+  for (let i = 0; i < 8; i++) environment.updateAtmosphere(0.5);
+  assert.ok(environment.cloudiness < 0.0001);
+  assert.ok(ocean.uniforms.uCloudiness.value < 0.0001);
+  assert.ok(ocean.uniforms.uCloudShadowStrength.value < 0.0001);
+});
+
+test('cloud rendering quality scales shader detail and water-shadow work', () => {
+  const { environment } = createFixture();
+  const ocean = {
+    uniforms: {
+      uCloudiness: { value: 0 },
+      uCloudOffset: { value: new THREE.Vector2() },
+      uCloudShadowStrength: { value: 0 },
+    },
+  };
+  environment.ocean = ocean;
+  environment.cloudiness = 0.8;
+
+  environment.setPerformanceBudget({ cloudOctaves: 2, cloudShadowScale: 0 });
+  assert.equal(environment.paradiseSkyMaterial.defines.CLOUD_OCTAVES, 2);
+  assert.equal(ocean.uniforms.uCloudShadowStrength.value, 0);
+
+  environment.setPerformanceBudget({ cloudOctaves: 5, cloudShadowScale: 1 });
+  assert.equal(environment.paradiseSkyMaterial.defines.CLOUD_OCTAVES, 5);
+  assert.equal(ocean.uniforms.uCloudShadowStrength.value, 0.8);
+  assert.match(environment.paradiseSkyMaterial.fragmentShader, /cloudFbm/);
+  assert.match(environment.paradiseSkyMaterial.fragmentShader, /uLightning/);
 });
 
 test('positions sky and lights without allocating replacement vectors', () => {

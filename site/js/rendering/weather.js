@@ -9,6 +9,7 @@ export class WeatherEffects {
     this.waveField = waveField;
     this.audio = audio;
     this.storm = 0;
+    this.flash = 0;
     this.flashTime = 0;
     this.flashDuration = 0;
     this.nextFlash = 5 + Math.random() * 5;
@@ -289,6 +290,7 @@ export class WeatherEffects {
     this.horizonMistMaterial.uniforms.uStorm.value = this.storm;
     this.horizonMistMaterial.uniforms.uTime.value += dt;
     if (this.storm <= 0.015) {
+      this.flash = 0;
       this.light.intensity = 0;
       this.skyFlash.style.opacity = '0';
       this.boltMaterial.opacity = 0;
@@ -329,6 +331,7 @@ export class WeatherEffects {
       ) * this.storm;
     }
     this.light.intensity = flash * 7;
+    this.flash = flash;
     this.skyFlash.style.opacity = String(flash * 0.7);
     this.boltMaterial.opacity = flash > 0.08 ? Math.min(1, flash * 2.4) : 0;
   }

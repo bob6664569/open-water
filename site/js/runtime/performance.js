@@ -7,6 +7,7 @@ const PROFILES = [
     physicsHz: 120, physicsMaxSteps: 4,
     oceanFarSegments: 192, oceanPatchSegments: 128,
     particleScale: 0.25, rainScale: 0.3,
+    cloudOctaves: 2, cloudShadowScale: 0,
   },
   {
     id: 'medium', dprMax: 1.25, scaleMin: 0.72, scaleStart: 0.9,
@@ -16,6 +17,7 @@ const PROFILES = [
     physicsHz: 120, physicsMaxSteps: 5,
     oceanFarSegments: 320, oceanPatchSegments: 192,
     particleScale: 0.5, rainScale: 0.5,
+    cloudOctaves: 3, cloudShadowScale: 0.55,
   },
   {
     id: 'high', dprMax: 1.5, scaleMin: 0.75, scaleStart: 1,
@@ -25,6 +27,7 @@ const PROFILES = [
     physicsHz: 180, physicsMaxSteps: 7,
     oceanFarSegments: 512, oceanPatchSegments: 256,
     particleScale: 0.75, rainScale: 0.75,
+    cloudOctaves: 4, cloudShadowScale: 0.82,
   },
   {
     id: 'ultra', dprMax: 2, scaleMin: 0.8, scaleStart: 1,
@@ -34,6 +37,7 @@ const PROFILES = [
     physicsHz: 240, physicsMaxSteps: 12,
     oceanFarSegments: 768, oceanPatchSegments: 320,
     particleScale: 1, rainScale: 1,
+    cloudOctaves: 5, cloudShadowScale: 1,
   },
 ];
 const QUALITY_STORAGE_KEY = 'ocean-boat:quality-mode';

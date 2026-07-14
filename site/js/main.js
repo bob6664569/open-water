@@ -190,7 +190,7 @@ const qualityController = new QualityController({
   waterPasses,
   bloom,
   sunLight,
-  budgetTargets: [boat, ocean, effects, weather, perceptualEffects, fauna],
+  budgetTargets: [boat, ocean, environment, effects, weather, perceptualEffects, fauna],
   resolutionTarget: ocean.uniforms.uResolution.value,
   achievements,
   elements: {
@@ -336,6 +336,7 @@ renderer.setAnimationLoop(() => {
   environment.positionSky(camera.position);
   audio.update(boat, camera, dt);
   weather.update(dt);
+  environment.setLightning(weather.flash);
   perceptualEffects.update(
     dt,
     weather.storm,

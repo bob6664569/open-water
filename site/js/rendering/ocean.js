@@ -260,6 +260,9 @@ export class Ocean {
       uBoatY: { value: 0 },
       uPatchCenter: { value: new THREE.Vector2() },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uCloudiness: { value: 0 },
+      uCloudOffset: { value: new THREE.Vector2() },
+      uCloudShadowStrength: { value: 0 },
       uReflMap: { value: makeEmptyTexture() },
       uReflMatrix: { value: new THREE.Matrix4() },
       uRefrMap: { value: makeEmptyTexture() },
@@ -560,6 +563,9 @@ export class Ocean {
           uniform float uSteepSum;
           uniform sampler2D uNormalTex;
           uniform vec3 uSunDir;
+          uniform float uCloudiness;
+          uniform vec2 uCloudOffset;
+          uniform float uCloudShadowStrength;
           uniform sampler2D uReflMap;
           uniform sampler2D uRefrMap;
           uniform sampler2D uRefrDepth;
@@ -631,6 +637,8 @@ export class Ocean {
             vec3 stormWater = vec3(0.05, 0.12, 0.16);
             vec3 water = mix(oceanWater, calmWater, paradise);
             water = mix(water, stormWater, storm);
+            vec3 overcastWater = water * vec3(0.78, 0.88, 0.96);
+            water = mix(water, overcastWater, uCloudiness * 0.42);
             diffuseColor.rgb = water;
 
             float cDist = length(vOWorldPos - cameraPosition);
@@ -763,6 +771,26 @@ export class Ocean {
             gl_FragColor.rgb = mix(gl_FragColor.rgb,
                                    gl_FragColor.rgb * vec3(0.88, 0.94, 1.0),
                                    far * 0.3);
+          }
+
+          if (uCloudShadowStrength > 0.001) {
+            vec2 cloudUv = vOWorldPos.xz * 0.0036 + uCloudOffset;
+            float broadCloud = ob_vnoise(cloudUv * 0.34 - vec2(7.3, 2.8));
+            float cloudDensity = ob_fbm(cloudUv) * mix(0.84, 1.08, broadCloud);
+            float cloudThreshold = mix(0.70, 0.48, uCloudiness);
+            float cloudMask = smoothstep(
+              cloudThreshold,
+              cloudThreshold + mix(0.13, 0.09, uCloudiness),
+              cloudDensity
+            );
+            float cloudShade = cloudMask * uCloudShadowStrength
+                             * mix(0.08, 0.24, uCloudiness);
+            gl_FragColor.rgb *= 1.0 - cloudShade;
+            gl_FragColor.rgb = mix(
+              gl_FragColor.rgb,
+              gl_FragColor.rgb * vec3(0.90, 0.95, 1.02),
+              cloudShade * 0.58
+            );
           }
 
           vec2 navLat = vec2(-uBoat.w, uBoat.z);

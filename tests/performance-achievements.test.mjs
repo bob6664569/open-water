@@ -258,7 +258,8 @@ test('quality profiles scale expensive budgets monotonically', async () => {
   const monotonicKeys = [
     'dprMax', 'scaleMin', 'scaleStart', 'msaa', 'shadowSize', 'reflectionSize',
     'refractionScale', 'physicsHz', 'physicsMaxSteps', 'oceanFarSegments',
-    'oceanPatchSegments', 'particleScale', 'rainScale',
+    'oceanPatchSegments', 'particleScale', 'rainScale', 'cloudOctaves',
+    'cloudShadowScale',
   ];
 
   assert.deepEqual(profiles.map(profile => profile.id), ['low', 'medium', 'high', 'ultra']);

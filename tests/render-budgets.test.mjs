@@ -156,7 +156,15 @@ test('wind strengthens micro-ripples without sliding the normal map over waves',
   const shader = {
     uniforms: {},
     vertexShader: '#include <common>\n#include <beginnormal_vertex>\n#include <begin_vertex>',
-    fragmentShader: '#include <common>\n#include <normal_fragment_begin>',
+    fragmentShader: [
+      '#include <common>',
+      'void main() {',
+      '#include <normal_fragment_begin>',
+      '#include <color_fragment>',
+      '#include <roughnessmap_fragment>',
+      '#include <opaque_fragment>',
+      '}',
+    ].join('\n'),
   };
 
   ocean.mesh.material.onBeforeCompile(shader);
@@ -167,6 +175,12 @@ test('wind strengthens micro-ripples without sliding the normal map over waves',
   assert.match(shader.vertexShader, /uniform vec4 uWake\[WAKE_MAX\]/);
   assert.match(shader.vertexShader, /uniform vec2 uWakeExtra\[WAKE_MAX\]/);
   assert.match(shader.vertexShader, /#if IS_PATCH == 1/);
+  assert.equal(shader.uniforms.uCloudiness, ocean.uniforms.uCloudiness);
+  assert.equal(shader.uniforms.uCloudOffset, ocean.uniforms.uCloudOffset);
+  assert.equal(shader.uniforms.uCloudShadowStrength,
+    ocean.uniforms.uCloudShadowStrength);
+  assert.match(shader.fragmentShader, /float cloudDensity = ob_fbm\(cloudUv\)/);
+  assert.match(shader.fragmentShader, /cloudMask \* uCloudShadowStrength/);
 });
 
 test('ocean updates reuse uniforms and snap both meshes to their grids', () => {
