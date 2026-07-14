@@ -186,13 +186,40 @@ test('wind strengthens micro-ripples without sliding the normal map over waves',
   assert.match(shader.fragmentShader, /float worldFootprint = max\(length\(dFdx/);
   assert.match(shader.fragmentShader, /float normalVariance = max\(dot\(normalDx/);
   assert.match(shader.fragmentShader, /float specularKernel = min\(normalVariance/);
-  assert.match(shader.fragmentShader, /float detailBlend = smoothstep\(35\.0, 43\.0/);
-  assert.match(shader.fragmentShader, /float transitionNoise = ob_transitionNoise/);
+  assert.match(shader.fragmentShader,
+    /if \(patchDistance < 40\.0\) discard/);
+  assert.doesNotMatch(shader.fragmentShader, /ob_transitionNoise|detailBlend/);
   assert.match(shader.fragmentShader, /vec2\(uTime \* 0\.011, uTime \* 0\.006\)/);
   assert.doesNotMatch(shader.fragmentShader, /wind(?:Dir|Cross) \* uTime/);
   assert.match(shader.vertexShader, /uniform vec4 uWake\[WAKE_MAX\]/);
   assert.match(shader.vertexShader, /uniform vec2 uWakeExtra\[WAKE_MAX\]/);
   assert.match(shader.vertexShader, /#if IS_PATCH == 1/);
+
+  const patchShader = {
+    uniforms: {},
+    vertexShader: '#include <common>\n#include <beginnormal_vertex>\n#include <begin_vertex>',
+    fragmentShader: [
+      '#include <common>',
+      'void main() {',
+      '#include <normal_fragment_begin>',
+      '#include <color_fragment>',
+      '#include <roughnessmap_fragment>',
+      '#include <opaque_fragment>',
+      '}',
+    ].join('\n'),
+  };
+  ocean.patch.material.onBeforeCompile(patchShader);
+  assert.equal(ocean.patch.material.defines.FAR_WAVE_COUNT, 10);
+  assert.match(patchShader.vertexShader,
+    /patchDetailFade = 1\.0 - smoothstep\(31\.0, 39\.0, patchDistance\)/);
+  assert.match(patchShader.vertexShader,
+    /if \(i >= FAR_WAVE_COUNT\) waveWeight = patchDetailFade/);
+  assert.match(patchShader.vertexShader,
+    /0\.35262 \* patchDetailFade/);
+  assert.match(patchShader.fragmentShader,
+    /if \(patchDistance >= 40\.0\) discard/);
+  assert.doesNotMatch(patchShader.fragmentShader,
+    /ob_transitionNoise|detailBlend/);
   assert.equal(shader.uniforms.uCloudiness, ocean.uniforms.uCloudiness);
   assert.equal(shader.uniforms.uCloudOffset, ocean.uniforms.uCloudOffset);
   assert.equal(shader.uniforms.uCloudShadowStrength,

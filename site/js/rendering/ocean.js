@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { WAKE_RENDER_SOURCES } from '../simulation/wake-field.js';
 
-// A coarse far mesh and a boat-following fine patch share uniforms. Their crossed
-// skirts hide overlap z-fighting while preserving detailed near-field displacement.
+// A coarse far mesh and a boat-following fine patch share uniforms. The fine
+// surface sheds its extra displacement before a clean, complementary handoff.
 const FAR_SIZE = 2200;
 const FAR_SEGS = 768;
 const PATCH_SIZE = 92;
@@ -344,6 +344,7 @@ export class Ocean {
 
     mat.defines = {
       WAVE_COUNT: this._waveCount,
+      FAR_WAVE_COUNT: Math.min(FAR_VTX_WAVES, this._waveCount),
       WAVE_VTX: isPatch ? this._waveCount
                         : Math.min(FAR_VTX_WAVES, this._waveCount),
       WAVE_NRM: 2,
@@ -388,10 +389,19 @@ export class Ocean {
           vec3 gDisp = vec3(0.0);
           vec3 gN = vec3(0.0, 1.0, 0.0);
           float gSteep = 0.0;
+          float patchDistance = distance(gXZ, uPatchCenter);
+          float patchDetailFade = 1.0;
+          #if IS_PATCH == 1
+            patchDetailFade = 1.0 - smoothstep(31.0, 39.0, patchDistance);
+          #endif
           for (int i = 0; i < WAVE_VTX; i++) {
             vec4 d = uWaveDirs[i];
             vec3 aq = uWaveAmps[i];
-            float A = aq.x;
+            float waveWeight = 1.0;
+            #if IS_PATCH == 1
+              if (i >= FAR_WAVE_COUNT) waveWeight = patchDetailFade;
+            #endif
+            float A = aq.x * waveWeight;
             float phi = d.z * dot(d.xy, gXZ) + aq.z;
             float c = cos(phi), s = sin(phi);
             float qa = aq.y * A;
@@ -524,7 +534,7 @@ export class Ocean {
                    + wakeFrontDerivative);
               float wakeGain = wake.z
                 * smoothstep(0.08, 0.72, wakeAge)
-                * exp(-wakeAge / 8.5) * 0.35262;
+                * exp(-wakeAge / 8.5) * 0.35262 * patchDetailFade;
               float wakeHeight = wakeGain * wakeAlongEnvelope * wakeShape;
               float wakeDAlong = wakeGain
                 * (wakeShape * wakeAlongDerivative
@@ -538,15 +548,6 @@ export class Ocean {
             }
           }
           #endif
-
-          {
-            float pd = distance(gXZ, uPatchCenter);
-            #if IS_PATCH == 1
-              gDisp.y -= smoothstep(43.0, 45.0, pd) * 2.5;
-            #else
-              gDisp.y -= (1.0 - smoothstep(33.0, 35.0, pd)) * 2.5;
-            #endif
-          }
 
           vFoam = gSteep;
           vElev = gDisp.y;
@@ -607,22 +608,15 @@ export class Ocean {
                  / (uCameraFar + uCameraNear
                     - z * (uCameraFar - uCameraNear));
           }
-          float ob_transitionNoise(vec2 worldXZ) {
-            vec2 cell = floor(worldXZ * 3.0);
-            return fract(52.9829189
-              * fract(dot(cell, vec2(0.06711056, 0.00583715))));
-          }
         `)
         .replace('#include <normal_fragment_begin>', /* glsl */`
           #include <normal_fragment_begin>
           {
-            float detailBlend = smoothstep(35.0, 43.0,
-              distance(vOGridPos, uPatchCenter));
-            float transitionNoise = ob_transitionNoise(vOGridPos);
+            float patchDistance = distance(vOGridPos, uPatchCenter);
             #if IS_PATCH == 1
-              if (transitionNoise < detailBlend) discard;
+              if (patchDistance >= 40.0) discard;
             #else
-              if (transitionNoise >= detailBlend) discard;
+              if (patchDistance < 40.0) discard;
             #endif
 
             float camDist = length(vOWorldPos - cameraPosition);
