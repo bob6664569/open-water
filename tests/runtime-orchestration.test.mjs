@@ -16,6 +16,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     "import { ViewInputController } from './controllers/view-input-controller.js';",
     "import { QualityController } from './runtime/quality-controller.js';",
     "import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';",
+    "import { ColorGrading } from './rendering/color-grading.js';",
     "import { ExperienceController } from './ui/experience-controller.js';",
     'const drive = new DriveController(',
     'const wakeField = new WakeField(',
@@ -27,6 +28,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     'const viewInput = new ViewInputController(',
     'const qualityController = new QualityController(',
     'const smaa = new SMAAPass(',
+    'const colorGrading = new ColorGrading(',
     'experience = new ExperienceController(',
     'void vessels.loadCatalog();',
     'drive.update(dt, waveField.time, gestureDrive.state);',
@@ -57,6 +59,7 @@ test('the frame loop preserves simulation and rendering dependency order', () =>
     'firstVoyageGuide.update(',
     'audio.update(',
     'weather.update(',
+    'colorGrading.update(',
     'fauna.update(',
     'boatHud.update(',
     'performanceManager.beginGpu(',
@@ -71,6 +74,14 @@ test('the frame loop preserves simulation and rendering dependency order', () =>
     assert.ok(index > previousIndex, `${step} moved before a required dependency`);
     previousIndex = index;
   }
+});
+
+test('color grading runs before SMAA and output conversion', () => {
+  const gradeIndex = mainSource.indexOf('composer.addPass(colorGrading.pass);');
+  const smaaIndex = mainSource.indexOf('composer.addPass(smaa);');
+  const outputIndex = mainSource.indexOf('composer.addPass(new OutputPass());');
+  assert.ok(gradeIndex >= 0 && gradeIndex < smaaIndex);
+  assert.ok(smaaIndex < outputIndex);
 });
 
 test('quality reallocations stay before rendering and resize delegates to the controller', () => {
