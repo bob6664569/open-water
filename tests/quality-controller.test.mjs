@@ -31,11 +31,11 @@ function createElement() {
 
 const HIGH = {
   id: 'high', dprMax: 1.5, scale: 1, bloom: true, bloomStrength: 0.2,
-  msaa: 2, shadowSize: 1536,
+  msaa: 2, smaa: true, shadowSize: 1536,
 };
 const LOW = {
   id: 'low', dprMax: 1, scale: 0.8, bloom: false, bloomStrength: 0,
-  msaa: 0, shadowSize: 512,
+  msaa: 0, smaa: false, shadowSize: 512,
 };
 
 function createFixture({ perf = false } = {}) {
@@ -114,6 +114,7 @@ function createFixture({ perf = false } = {}) {
     composer,
     waterPasses,
     bloom: {},
+    smaa: {},
     sunLight,
     budgetTargets,
     resolutionTarget,
@@ -158,6 +159,7 @@ test('initial quality configures render targets before subsystem budgets', () =>
 
   assert.equal(fixture.controller.current, HIGH);
   assert.equal(fixture.composer.renderTarget1.samples, 2);
+  assert.equal(fixture.controller.smaa.enabled, true);
   assert.equal(fixture.composer.renderTarget1.disposed, 1);
   assert.equal(fixture.composer.renderTarget2.disposed, 0);
   assert.equal(fixture.shadowMap.disposed, 1);
@@ -180,6 +182,7 @@ test('manager changes remain queued until the pre-render application point', () 
 
   assert.equal(fixture.controller.applyPending(), true);
   assert.equal(fixture.controller.current, LOW);
+  assert.equal(fixture.controller.smaa.enabled, false);
   assert.equal(fixture.controller.applyPending(), false);
   assert.equal(fixture.calls[0][0], 'renderer-ratio');
   assert.equal(fixture.calls.some(call => call[0] === 'water-quality'), true);

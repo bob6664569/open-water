@@ -258,11 +258,13 @@ test('quality profiles scale expensive budgets monotonically', async () => {
   const monotonicKeys = [
     'dprMax', 'scaleMin', 'scaleStart', 'msaa', 'shadowSize', 'reflectionSize',
     'refractionScale', 'physicsHz', 'physicsMaxSteps', 'oceanFarSegments',
-    'oceanPatchSegments', 'particleScale', 'rainScale', 'cloudOctaves',
+    'oceanPatchSegments', 'oceanNormalDetail', 'particleScale', 'rainScale',
+    'cloudOctaves',
     'cloudShadowScale',
   ];
 
   assert.deepEqual(profiles.map(profile => profile.id), ['low', 'medium', 'high', 'ultra']);
+  assert.deepEqual(profiles.map(profile => profile.smaa), [false, true, true, true]);
   for (const key of monotonicKeys) {
     const values = profiles.map(profile => profile[key]);
     assert.deepEqual(values, [...values].sort((a, b) => a - b), `${key} must be monotonic`);

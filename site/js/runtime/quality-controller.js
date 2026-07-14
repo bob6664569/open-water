@@ -9,6 +9,7 @@ export class QualityController {
     composer,
     waterPasses,
     bloom,
+    smaa,
     sunLight,
     budgetTargets = [],
     resolutionTarget = null,
@@ -27,6 +28,7 @@ export class QualityController {
     this.composer = composer;
     this.waterPasses = waterPasses;
     this.bloom = bloom;
+    this.smaa = smaa;
     this.sunLight = sunLight;
     this.budgetTargets = budgetTargets;
     this.resolutionTarget = resolutionTarget;
@@ -128,6 +130,7 @@ export class QualityController {
     });
     this.bloom.enabled = quality.bloom;
     this.bloom.strength = quality.bloomStrength;
+    this.smaa.enabled = quality.smaa;
     this._setTargetSamples(this.composer.renderTarget1, quality.msaa);
     this._setTargetSamples(this.composer.renderTarget2, quality.msaa);
 

@@ -143,9 +143,17 @@ test('ocean budgets replace geometry only when segment counts change', () => {
   assert.equal(patchDisposed, true);
   const currentFar = ocean.mesh.geometry;
   const currentPatch = ocean.patch.geometry;
-  ocean.setPerformanceBudget({ oceanFarSegments: 10, oceanPatchSegments: 6 });
+  ocean.setPerformanceBudget({
+    oceanFarSegments: 10,
+    oceanPatchSegments: 6,
+    oceanNormalDetail: 0.58,
+  });
   assert.equal(ocean.mesh.geometry, currentFar);
   assert.equal(ocean.patch.geometry, currentPatch);
+  assert.equal(ocean.uniforms.uNormalDetail.value, 0.58);
+
+  ocean.setPerformanceBudget({ oceanNormalDetail: 4 });
+  assert.equal(ocean.uniforms.uNormalDetail.value, 1);
 });
 
 test('wind strengthens micro-ripples without sliding the normal map over waves', () => {
@@ -170,6 +178,11 @@ test('wind strengthens micro-ripples without sliding the normal map over waves',
   ocean.mesh.material.onBeforeCompile(shader);
 
   assert.match(shader.fragmentShader, /float windSpeed = length\(uWind\.xz\)/);
+  assert.match(shader.fragmentShader, /float worldFootprint = max\(length\(dFdx/);
+  assert.match(shader.fragmentShader, /float normalVariance = max\(dot\(normalDx/);
+  assert.match(shader.fragmentShader, /float specularKernel = min\(normalVariance/);
+  assert.match(shader.fragmentShader, /float detailBlend = smoothstep\(35\.0, 43\.0/);
+  assert.match(shader.fragmentShader, /float transitionNoise = ob_transitionNoise/);
   assert.match(shader.fragmentShader, /vec2\(uTime \* 0\.011, uTime \* 0\.006\)/);
   assert.doesNotMatch(shader.fragmentShader, /wind(?:Dir|Cross) \* uTime/);
   assert.match(shader.vertexShader, /uniform vec4 uWake\[WAKE_MAX\]/);
@@ -179,6 +192,7 @@ test('wind strengthens micro-ripples without sliding the normal map over waves',
   assert.equal(shader.uniforms.uCloudOffset, ocean.uniforms.uCloudOffset);
   assert.equal(shader.uniforms.uCloudShadowStrength,
     ocean.uniforms.uCloudShadowStrength);
+  assert.equal(shader.uniforms.uNormalDetail, ocean.uniforms.uNormalDetail);
   assert.match(shader.fragmentShader, /float cloudDensity = ob_fbm\(cloudUv\)/);
   assert.match(shader.fragmentShader, /cloudMask \* uCloudShadowStrength/);
 });

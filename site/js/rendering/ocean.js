@@ -251,6 +251,7 @@ export class Ocean {
       },
       uSteepSum: { value: waveField.totalSteepness },
       uNormalTex: { value: makeWaterNormalTexture() },
+      uNormalDetail: { value: quality.oceanNormalDetail ?? 1 },
       uBoat: { value: new THREE.Vector4(0, 0, 0, 1) },
       uBoatSpeed: { value: 0 },
       uBoatFroude: { value: 0 },
@@ -309,7 +310,14 @@ export class Ocean {
     return makeOceanGridGeometry(size, segments, adaptive);
   }
 
-  setPerformanceBudget({ oceanFarSegments, oceanPatchSegments } = {}) {
+  setPerformanceBudget({
+    oceanFarSegments,
+    oceanPatchSegments,
+    oceanNormalDetail,
+  } = {}) {
+    if (Number.isFinite(oceanNormalDetail)) {
+      this.uniforms.uNormalDetail.value = THREE.MathUtils.clamp(oceanNormalDetail, 0, 1);
+    }
     if (!oceanFarSegments || !oceanPatchSegments) return;
     if (oceanFarSegments === this.farSegments
         && oceanPatchSegments === this.patchSegments) return;
@@ -368,6 +376,7 @@ export class Ocean {
           uniform vec2 uPatchCenter;
           uniform mat4 uReflMatrix;
           varying vec3 vOWorldPos;
+          varying vec2 vOGridPos;
           varying vec4 vReflCoord;
           varying float vFoam;
           varying float vElev;
@@ -533,14 +542,15 @@ export class Ocean {
           {
             float pd = distance(gXZ, uPatchCenter);
             #if IS_PATCH == 1
-              gDisp.y -= smoothstep(40.0, 44.5, pd) * 2.5;
+              gDisp.y -= smoothstep(43.0, 45.0, pd) * 2.5;
             #else
-              gDisp.y -= (1.0 - smoothstep(34.0, 40.0, pd)) * 2.5;
+              gDisp.y -= (1.0 - smoothstep(33.0, 35.0, pd)) * 2.5;
             #endif
           }
 
           vFoam = gSteep;
           vElev = gDisp.y;
+          vOGridPos = gXZ;
           vOWorldPos = vec3(gXZ.x + gDisp.x, gDisp.y, gXZ.y + gDisp.z);
           vReflCoord = uReflMatrix * vec4(vOWorldPos, 1.0);
 
@@ -562,6 +572,7 @@ export class Ocean {
           uniform vec3 uWaveAmps[WAVE_COUNT];
           uniform float uSteepSum;
           uniform sampler2D uNormalTex;
+          uniform float uNormalDetail;
           uniform vec3 uSunDir;
           uniform float uCloudiness;
           uniform vec2 uCloudOffset;
@@ -572,6 +583,7 @@ export class Ocean {
           uniform float uCameraNear;
           uniform float uCameraFar;
           uniform vec2 uResolution;
+          uniform vec2 uPatchCenter;
           uniform sampler2D uFoamTex;
           uniform sampler2D uFoamTrail;
           uniform vec2 uTrailCenter;
@@ -585,6 +597,7 @@ export class Ocean {
           uniform vec3 uNavCol[NAV_MAX];
           varying vec4 vReflCoord;
           varying vec3 vOWorldPos;
+          varying vec2 vOGridPos;
           varying float vFoam;
           varying float vElev;
           ${NOISE_GLSL}
@@ -594,10 +607,24 @@ export class Ocean {
                  / (uCameraFar + uCameraNear
                     - z * (uCameraFar - uCameraNear));
           }
+          float ob_transitionNoise(vec2 worldXZ) {
+            vec2 cell = floor(worldXZ * 3.0);
+            return fract(52.9829189
+              * fract(dot(cell, vec2(0.06711056, 0.00583715))));
+          }
         `)
         .replace('#include <normal_fragment_begin>', /* glsl */`
           #include <normal_fragment_begin>
           {
+            float detailBlend = smoothstep(35.0, 43.0,
+              distance(vOGridPos, uPatchCenter));
+            float transitionNoise = ob_transitionNoise(vOGridPos);
+            #if IS_PATCH == 1
+              if (transitionNoise < detailBlend) discard;
+            #else
+              if (transitionNoise >= detailBlend) discard;
+            #endif
+
             float camDist = length(vOWorldPos - cameraPosition);
             float rippleFade = 1.0 - smoothstep(60.0, 320.0, camDist);
             vec3 rN = vec3(0.0);
@@ -619,10 +646,28 @@ export class Ocean {
             vec2 s2 = texture2D(uNormalTex, rot * 0.145
                         - vec2(uTime * 0.02, -uTime * 0.012)).xy * 2.0 - 1.0;
             float rippleStrength = clamp(0.36 + windSpeed * 0.057, 0.4, 1.52);
+            float worldFootprint = max(length(dFdx(vOWorldPos.xz)),
+                                       length(dFdy(vOWorldPos.xz)));
+            float detailRange = mix(110.0, 420.0, uNormalDetail);
+            float distanceDetail = 1.0
+              - smoothstep(detailRange * 0.42, detailRange, camDist);
+            float footprintDetail = 1.0
+              - smoothstep(mix(0.2, 0.38, uNormalDetail),
+                           mix(0.75, 1.8, uNormalDetail), worldFootprint);
+            float microDetail = distanceDetail * footprintDetail
+              * mix(0.62, 1.0, uNormalDetail);
             vec2 sTex = (s1 * 0.20 + s2.yx * vec2(-0.18, 0.18))
-                      * rippleStrength;
+                      * rippleStrength * microDetail;
             normal = normalize(normal + rN * rippleFade
                                + vec3(sTex.x, 0.0, sTex.y));
+
+            vec3 normalDx = dFdx(normal);
+            vec3 normalDy = dFdy(normal);
+            float normalVariance = max(dot(normalDx, normalDx),
+                                       dot(normalDy, normalDy));
+            float specularKernel = min(normalVariance * 0.28, 0.2);
+            roughnessFactor = min(1.0, sqrt(roughnessFactor * roughnessFactor
+                                           + specularKernel));
           }
         `)
         .replace('#include <color_fragment>', /* glsl */`

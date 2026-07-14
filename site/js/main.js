@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { WaveField, SEA_PRESETS } from './simulation/waves.js';
 import { WakeField } from './simulation/wake-field.js';
@@ -180,6 +181,8 @@ composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(bufSize.clone(), 0.22, 0.55, 1.0);
 composer.addPass(bloom);
 composer.addPass(perceptualEffects.lensPass);
+const smaa = new SMAAPass(bufSize.x, bufSize.y);
+composer.addPass(smaa);
 composer.addPass(new OutputPass());
 ocean.uniforms.uResolution.value.copy(bufSize);
 
@@ -189,6 +192,7 @@ const qualityController = new QualityController({
   composer,
   waterPasses,
   bloom,
+  smaa,
   sunLight,
   budgetTargets: [boat, ocean, environment, effects, weather, perceptualEffects, fauna],
   resolutionTarget: ocean.uniforms.uResolution.value,
