@@ -164,6 +164,8 @@ export class EnvironmentController {
     this.sunLight.shadow.camera.near = 10;
     this.sunLight.shadow.camera.far = 160;
     this.sunLight.shadow.bias = -0.0004;
+    this.sunLight.shadow.normalBias = 0.025;
+    this.sunLight.shadow.radius = 1.4;
     scene.add(this.sunLight, this.sunLight.target);
 
     this.paradiseSkyMaterial = new THREE.ShaderMaterial({

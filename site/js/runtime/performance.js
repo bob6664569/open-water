@@ -8,6 +8,9 @@ const PROFILES = [
     oceanFarSegments: 192, oceanPatchSegments: 128, oceanNormalDetail: 0.38,
     particleScale: 0.25, rainScale: 0.3,
     cloudOctaves: 2, cloudShadowScale: 0,
+    vesselOcclusion: false, vesselOcclusionScale: 0.35,
+    vesselOcclusionSamples: 4, vesselOcclusionRadius: 0.5,
+    vesselOcclusionIntensity: 0,
   },
   {
     id: 'medium', dprMax: 1.25, scaleMin: 0.72, scaleStart: 0.9,
@@ -18,6 +21,9 @@ const PROFILES = [
     oceanFarSegments: 320, oceanPatchSegments: 192, oceanNormalDetail: 0.58,
     particleScale: 0.5, rainScale: 0.5,
     cloudOctaves: 3, cloudShadowScale: 0.55,
+    vesselOcclusion: false, vesselOcclusionScale: 0.4,
+    vesselOcclusionSamples: 6, vesselOcclusionRadius: 0.55,
+    vesselOcclusionIntensity: 0,
   },
   {
     id: 'high', dprMax: 1.5, scaleMin: 0.75, scaleStart: 1,
@@ -28,6 +34,9 @@ const PROFILES = [
     oceanFarSegments: 512, oceanPatchSegments: 256, oceanNormalDetail: 0.8,
     particleScale: 0.75, rainScale: 0.75,
     cloudOctaves: 4, cloudShadowScale: 0.82,
+    vesselOcclusion: true, vesselOcclusionScale: 0.45,
+    vesselOcclusionSamples: 8, vesselOcclusionRadius: 0.6,
+    vesselOcclusionIntensity: 0.38,
   },
   {
     id: 'ultra', dprMax: 2, scaleMin: 0.8, scaleStart: 1,
@@ -38,6 +47,9 @@ const PROFILES = [
     oceanFarSegments: 768, oceanPatchSegments: 320, oceanNormalDetail: 1,
     particleScale: 1, rainScale: 1,
     cloudOctaves: 5, cloudShadowScale: 1,
+    vesselOcclusion: true, vesselOcclusionScale: 0.6,
+    vesselOcclusionSamples: 12, vesselOcclusionRadius: 0.72,
+    vesselOcclusionIntensity: 0.48,
   },
 ];
 const QUALITY_STORAGE_KEY = 'ocean-boat:quality-mode';

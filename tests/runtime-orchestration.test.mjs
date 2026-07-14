@@ -17,6 +17,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     "import { QualityController } from './runtime/quality-controller.js';",
     "import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';",
     "import { ColorGrading } from './rendering/color-grading.js';",
+    "import { VesselOcclusionPass } from './rendering/vessel-occlusion.js';",
     "import { ExperienceController } from './ui/experience-controller.js';",
     'const drive = new DriveController(',
     'const wakeField = new WakeField(',
@@ -29,6 +30,7 @@ test('main delegates driving, cameras and water passes to focused runtime contro
     'const qualityController = new QualityController(',
     'const smaa = new SMAAPass(',
     'const colorGrading = new ColorGrading(',
+    'const vesselOcclusion = new VesselOcclusionPass(',
     'experience = new ExperienceController(',
     'void vessels.loadCatalog();',
     'drive.update(dt, waveField.time, gestureDrive.state);',
@@ -82,6 +84,14 @@ test('color grading runs before SMAA and output conversion', () => {
   const outputIndex = mainSource.indexOf('composer.addPass(new OutputPass());');
   assert.ok(gradeIndex >= 0 && gradeIndex < smaaIndex);
   assert.ok(smaaIndex < outputIndex);
+});
+
+test('vessel occlusion is composed before bloom and color grading', () => {
+  const occlusionIndex = mainSource.indexOf('composer.addPass(vesselOcclusion);');
+  const bloomIndex = mainSource.indexOf('composer.addPass(bloom);');
+  const gradeIndex = mainSource.indexOf('composer.addPass(colorGrading.pass);');
+  assert.ok(occlusionIndex >= 0 && occlusionIndex < bloomIndex);
+  assert.ok(bloomIndex < gradeIndex);
 });
 
 test('quality reallocations stay before rendering and resize delegates to the controller', () => {

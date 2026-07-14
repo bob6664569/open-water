@@ -13,6 +13,7 @@ import { FoamTrail } from './rendering/foamtrail.js';
 import { WeatherEffects } from './rendering/weather.js';
 import { PerceptualEffects } from './rendering/perceptual-effects.js';
 import { ColorGrading } from './rendering/color-grading.js';
+import { VesselOcclusionPass } from './rendering/vessel-occlusion.js';
 import { WaterPassRenderer } from './rendering/water-pass-renderer.js';
 import { EnvironmentController } from './rendering/environment-controller.js';
 import { createFaunaManager } from './fauna/index.js';
@@ -180,6 +181,8 @@ const composerRT = new THREE.WebGLRenderTarget(bufSize.x, bufSize.y, {
 });
 const composer = new EffectComposer(renderer, composerRT);
 composer.addPass(new RenderPass(scene, camera));
+const vesselOcclusion = new VesselOcclusionPass(scene, camera, bufSize.x, bufSize.y);
+composer.addPass(vesselOcclusion);
 const bloom = new UnrealBloomPass(bufSize.clone(), 0.22, 0.55, 1.0);
 composer.addPass(bloom);
 composer.addPass(perceptualEffects.lensPass);
@@ -197,7 +200,10 @@ const qualityController = new QualityController({
   bloom,
   smaa,
   sunLight,
-  budgetTargets: [boat, ocean, environment, effects, weather, perceptualEffects, fauna],
+  budgetTargets: [
+    boat, ocean, environment, effects, weather, perceptualEffects, fauna,
+    vesselOcclusion,
+  ],
   resolutionTarget: ocean.uniforms.uResolution.value,
   achievements,
   elements: {

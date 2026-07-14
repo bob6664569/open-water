@@ -39,7 +39,8 @@ function makeSpec(config) {
     maxThrustFwd, maxThrustRev, maxSpeed, maxSteerDeg,
     dragLong, dragLat, planingLift, planingLiftMax,
     rollStiff, bankGain, bankMax, camera, audio, rig, waterMask,
-    materialColors, materialRepairs, reversed,
+    materialColors, materialFinishes, materialRepairs, enhancedRendering,
+    reversed,
   } = config;
   const pointY = -(restDraft + config.rideHeight);
   return {
@@ -104,7 +105,9 @@ function makeSpec(config) {
     rig,
     waterMask,
     materialColors,
+    materialFinishes,
     materialRepairs,
+    enhancedRendering: enhancedRendering !== false,
   };
 }
 
@@ -318,6 +321,58 @@ export const VESSEL_SPECS = {
       helm: [0, 2.05, 0.65], chaseDistance: 18, chaseHeight: 1.5, helmFov: 58,
     },
     materialColors: { blinn5: 0xa0703f, phongE2: 0xa0703f, lambert1: 0xa0703f },
+    // This legacy export uses generic shader names, so its finishes must be
+    // authored explicitly instead of inferred from those names.
+    materialFinishes: {
+      blinn5: {
+        family: 'wood', roughness: 0.52, envMapIntensity: 0.64,
+        specularIntensity: 0.3, clearcoat: 0,
+      },
+      blinn1: {
+        family: 'wood', roughness: 0.5, envMapIntensity: 0.66,
+        specularIntensity: 0.32, clearcoat: 0,
+      },
+      coperta1: {
+        family: 'wood', roughness: 0.58, envMapIntensity: 0.6,
+        specularIntensity: 0.28, clearcoat: 0,
+      },
+      lambert2: {
+        family: 'wood', roughness: 0.55, envMapIntensity: 0.62,
+        specularIntensity: 0.3, clearcoat: 0,
+      },
+      lambert1: {
+        family: 'wood', roughness: 0.54, envMapIntensity: 0.62,
+        specularIntensity: 0.3, clearcoat: 0,
+      },
+      phongE2: {
+        family: 'soft', roughness: 0.74, envMapIntensity: 0.45,
+        specularIntensity: 0.2, clearcoat: 0,
+      },
+      nero1: {
+        family: 'soft', roughness: 0.78, envMapIntensity: 0.48,
+        specularIntensity: 0.2, clearcoat: 0,
+      },
+      blinn2: {
+        family: 'paint', metalness: 0, roughness: 0.32,
+        clearcoat: 0.38, clearcoatRoughness: 0.22,
+      },
+      fiancate: {
+        family: 'paint', metalness: 0, roughness: 0.3,
+        clearcoat: 0.45, clearcoatRoughness: 0.2,
+      },
+      chiglia1: {
+        family: 'paint', metalness: 0, roughness: 0.42,
+        clearcoat: 0.24, clearcoatRoughness: 0.28,
+      },
+      lambert3: {
+        family: 'paint', metalness: 0, roughness: 0.4,
+        clearcoat: 0.3, clearcoatRoughness: 0.26,
+      },
+      blinn6: { family: 'glass', metalness: 0, roughness: 0.12 },
+      blinn7: { family: 'glass', metalness: 0, roughness: 0.18 },
+      blinn13: { family: 'glass', metalness: 0, roughness: 0.16 },
+      blinn8: { family: 'metal', metalness: 0.92, roughness: 0.22 },
+    },
     audio: {
       bank: 'motoryacht', idleHz: 34, maxHz: 112,
       filterBase: 280, filterRange: 760, gain: 0.28,
@@ -412,6 +467,9 @@ export const VESSEL_SPECS = {
     yawDamp: [16400, 1120, 29200], pitchRollDamp: [43000, 20500],
     rollStiff: 31500, bankGain: 560, bankMax: 8700, wavePush: 0.065,
     camera: { helm: [0, 2.55, -0.85], chaseDistance: 20, chaseHeight: 1.8, helmFov: 57 },
+    // Preserve this legacy GLB exactly as authored. The generic material and
+    // screen-space occlusion passes make its white cabin cladding translucent.
+    enhancedRendering: false,
     audio: {
       bank: 'motoryacht', idleHz: 31, maxHz: 98,
       filterBase: 250, filterRange: 680, gain: 0.3,

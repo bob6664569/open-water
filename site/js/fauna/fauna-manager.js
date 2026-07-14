@@ -23,7 +23,7 @@ export class FaunaManager {
   }
 
   update(dt) {
-    this.wildlife.update(dt);
+    this.wildlife.update(dt, this.fish.schools);
     this.fish.update(dt);
     this.dolphins.update(dt);
     this.whales.update(dt);

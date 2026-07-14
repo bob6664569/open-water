@@ -9,6 +9,15 @@ const GULL_SPAWN = {
   2: { max: 14, interval: [2, 6] },
   3: { max: 2, interval: [12, 30] },
 };
+const FORAGING_FLOCK = {
+  count: [2, 4],
+  firstDelay: [18, 35],
+  cooldown: [40, 85],
+  duration: [24, 42],
+  radius: [10, 17],
+  altitude: [9, 15],
+  maxDistance: 125,
+};
 const STORM_PRESET = 4;
 
 const MODEL_URL   = './assets/animals/flying_seagull.glb';
@@ -62,6 +71,9 @@ export class Wildlife {
     this.gulls = [];
     this.spawnTimer = rand(2, 6);
     this.cryTimer = rand(2, 5);
+    this.foragingTimer = rand(...FORAGING_FLOCK.firstDelay);
+    this.foragingSchool = null;
+    this.foragingUntil = 0;
     this.spawnRadius = [80, 170];
     this.despawnRadius = 560;
     this.fleeRadius = 320;
@@ -93,7 +105,12 @@ export class Wildlife {
 
   _clip(name) { return this.clips && this.clips.find(c => c.name === name); }
 
-  _spawnGull({ position = null, heading: guidedHeading = null, guidedCenter = null } = {}) {
+  _spawnGull({
+    position = null,
+    heading: guidedHeading = null,
+    guidedCenter = null,
+    foragingSchool = null,
+  } = {}) {
     const cam = this.camera.position;
     const bearing = rand(0, Math.PI * 2);
     const R = rand(this.spawnRadius[0], this.spawnRadius[1]);
@@ -109,6 +126,7 @@ export class Wildlife {
     g.rotation.order = 'YXZ';
     g.position.copy(pos);
 
+    const orbitCenter = guidedCenter || foragingSchool?.center;
     const bird = {
       g, pos, heading,
       mixer: null, flapAct: null, glideAct: null, rp: null, lp: null,
@@ -119,11 +137,12 @@ export class Wildlife {
       glidePhase: rand(0, 6.28), glideFreq: rand(0.1, 0.24),
       restDihedral: rand(0.03, 0.09),
       flapPhase: rand(0, 6.28), flapFreq: rand(5, 9), flapAmp: rand(0.5, 0.72),
-      guidedCenter: guidedCenter?.clone() || null,
+      guidedCenter: orbitCenter?.clone() || null,
       guided: !!guidedCenter,
+      foragingSchool,
       orbitSign: Math.random() < 0.5 ? -1 : 1,
-      orbitRadius: guidedCenter
-        ? Math.max(10, Math.hypot(pos.x - guidedCenter.x, pos.z - guidedCenter.z))
+      orbitRadius: orbitCenter
+        ? Math.max(10, Math.hypot(pos.x - orbitCenter.x, pos.z - orbitCenter.z))
         : 0,
       life: 0,
     };
@@ -161,6 +180,7 @@ export class Wildlife {
   }
 
   spawnGuidedFlockAt(position, count = 14) {
+    if (this.foragingSchool) this._releaseForagingFlock();
     this._load();
     if (!this.loaded) return false;
     for (let i = 0; i < count; i++) {
@@ -183,9 +203,88 @@ export class Wildlife {
     return true;
   }
 
+  _spawnForagingFlock(school) {
+    const count = Math.round(rand(...FORAGING_FLOCK.count));
+    for (let i = 0; i < count; i++) {
+      const angle = i / count * Math.PI * 2 + rand(-0.45, 0.45);
+      const radius = rand(...FORAGING_FLOCK.radius);
+      const altitude = rand(...FORAGING_FLOCK.altitude);
+      const pos = new THREE.Vector3(
+        school.center.x + Math.sin(angle) * radius,
+        altitude,
+        school.center.z + Math.cos(angle) * radius,
+      );
+      const orbitSign = i % 2 ? -1 : 1;
+      const bird = this._spawnGull({
+        position: pos,
+        heading: angle + orbitSign * Math.PI / 2,
+        foragingSchool: school,
+      });
+      bird.orbitSign = orbitSign;
+      bird.speed = rand(6.5, 9.5);
+    }
+    this.foragingSchool = school;
+    this.foragingUntil = this.time + rand(...FORAGING_FLOCK.duration);
+  }
+
+  _releaseForagingFlock() {
+    for (const bird of this.gulls) {
+      if (!bird.foragingSchool) continue;
+      bird.guidedCenter = null;
+      bird.foragingSchool = null;
+      bird.life = 0;
+    }
+    this.foragingSchool = null;
+    this.foragingUntil = 0;
+    this.foragingTimer = rand(...FORAGING_FLOCK.cooldown);
+  }
+
+  _updateForagingFlock(dt, schools) {
+    const activeSchools = Array.isArray(schools) ? schools : [];
+    if (this.foragingSchool) {
+      const school = this.foragingSchool;
+      const shouldLeave = !activeSchools.includes(school)
+        || school.guided
+        || school.scattered
+        || school.members.length < 3
+        || this.time >= this.foragingUntil
+        || this.wf.preset >= STORM_PRESET;
+      if (shouldLeave) {
+        this._releaseForagingFlock();
+        return;
+      }
+      for (const bird of this.gulls) {
+        if (bird.foragingSchool === school) bird.guidedCenter.copy(school.center);
+      }
+      return;
+    }
+
+    for (const bird of this.gulls) {
+      if (bird.guided) return;
+    }
+    const maxDistanceSq = FORAGING_FLOCK.maxDistance * FORAGING_FLOCK.maxDistance;
+    let candidate = null;
+    let candidateCount = 0;
+    for (const school of activeSchools) {
+      if (school.guided || school.scattered || school.members.length < 3) continue;
+      const dx = school.center.x - this.camera.position.x;
+      const dz = school.center.z - this.camera.position.z;
+      if (dx * dx + dz * dz > maxDistanceSq) continue;
+      candidateCount++;
+      if (Math.random() < 1 / candidateCount) candidate = school;
+    }
+    if (!candidate) return;
+
+    this.foragingTimer -= dt;
+    if (this.foragingTimer > 0) return;
+    this._load();
+    if (!this.loaded) return;
+    this._spawnForagingFlock(candidate);
+  }
+
   releaseGuidedFlock() {
     for (const bird of this.gulls) {
-      if (!bird.guidedCenter) continue;
+      if (!bird.guided) continue;
       bird.guidedCenter = null;
       bird.guided = false;
       bird.life = 0;
@@ -273,10 +372,11 @@ export class Wildlife {
     b.g.rotation.set(rough * gust * 0.12, b.heading, bank);
   }
 
-  update(dt) {
+  update(dt, schools = []) {
     this.time += dt;
     const preset = this.wf.preset;
     const cfg = GULL_SPAWN[preset];
+    this._updateForagingFlock(dt, schools);
     if (this.time > 1.5 && (cfg || this.gulls.length)) this._load();
     if (!this.loaded) return;
     if (cfg) {

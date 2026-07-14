@@ -3,6 +3,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VESSEL_SPECS } from './vessels.js';
 import { VesselAnimationRig } from './vessel-animations.js';
 import { enableWaterPasses } from '../rendering/render-layers.js';
+import { enableVesselOcclusion } from '../rendering/vessel-occlusion.js';
+import { tuneVesselMaterials } from '../rendering/vessel-materials.js';
 
 const G = 9.81;
 const HALF_AIR_DENSITY = 0.6125;
@@ -24,6 +26,11 @@ function disposeObject(root) {
     (Array.isArray(o.material) ? o.material : [o.material])
       .forEach(m => { if (m && m.dispose) m.dispose(); });
   });
+}
+
+function meshMaterials(mesh) {
+  if (!mesh.material) return [];
+  return Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 }
 
 const MAX_TEXTURE = (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) ? 1024 : Infinity;
@@ -243,35 +250,50 @@ export class Boat {
       const assoc = gltf.parser.associations;
       model.traverse(o => {
         if (o.isMesh && o.material) {
-          const m = o.material;
-          const a = assoc && assoc.get(m);
-          if (a && a.materials !== undefined && jmats[a.materials]) {
-            const ext = jmats[a.materials].extensions || {};
-            const sg = ext.KHR_materials_pbrSpecularGlossiness;
-            if (sg && sg.diffuseFactor && m.color) {
-              m.color.setRGB(sg.diffuseFactor[0], sg.diffuseFactor[1],
-                             sg.diffuseFactor[2]);
-              if (sg.glossinessFactor !== undefined) {
-                m.roughness = 1 - sg.glossinessFactor;
+          meshMaterials(o).forEach(m => {
+            const a = assoc && assoc.get(m);
+            if (a && a.materials !== undefined && jmats[a.materials]) {
+              const ext = jmats[a.materials].extensions || {};
+              const sg = ext.KHR_materials_pbrSpecularGlossiness;
+              if (sg && sg.diffuseFactor && m.color) {
+                m.color.setRGB(sg.diffuseFactor[0], sg.diffuseFactor[1],
+                               sg.diffuseFactor[2]);
+                if (sg.glossinessFactor !== undefined) {
+                  m.roughness = 1 - sg.glossinessFactor;
+                }
               }
             }
-          }
-          m.envMapIntensity = 0.8;
-          if (m.roughness !== undefined) m.roughness = Math.max(m.roughness, 0.28);
-          if (m.color) {
-            const lum = m.color.r * 0.3 + m.color.g * 0.6 + m.color.b * 0.1;
-            if (lum > 0.82) m.color.multiplyScalar(0.82 / lum);
-          }
-          if (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) > 0) {
-            m.emissive.multiplyScalar(0.15);
-          }
-          const override = this.spec.materialColors?.[m.name];
-          if (override !== undefined && m.color) m.color.setHex(override);
-          o.castShadow = true;
-          enableWaterPasses(o);
+            if (!this.spec.enhancedRendering) {
+              m.envMapIntensity = 0.8;
+              if (m.roughness !== undefined) {
+                m.roughness = Math.max(m.roughness, 0.28);
+              }
+            }
+            if (m.color) {
+              const lum = m.color.r * 0.3 + m.color.g * 0.6 + m.color.b * 0.1;
+              if (lum > 0.82) m.color.multiplyScalar(0.82 / lum);
+            }
+            if (m.emissive && (m.emissive.r + m.emissive.g + m.emissive.b) > 0) {
+              m.emissive.multiplyScalar(0.15);
+            }
+            const override = this.spec.materialColors?.[m.name];
+            if (override !== undefined && m.color) m.color.setHex(override);
+          });
         }
       });
       repairOpaqueMaterialRegions(model, this.spec.materialRepairs);
+      if (this.spec.enhancedRendering) {
+        tuneVesselMaterials(model, this.spec.materialFinishes);
+      }
+      model.traverse(o => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        enableWaterPasses(o);
+        if (this.spec.enhancedRendering
+          && meshMaterials(o).some(m => !m.transparent || m.opacity >= 0.98)) {
+          enableVesselOcclusion(o);
+        }
+      });
       capModelTextures(model);
       const nsize = new THREE.Box3().setFromObject(model)
         .getSize(new THREE.Vector3());
@@ -334,8 +356,17 @@ export class Boat {
       console.warn(url + ' unavailable', e);
       if (!this.model) {
         const fb = buildFallbackBoat();
+        if (this.spec.enhancedRendering) {
+          tuneVesselMaterials(fb, this.spec.materialFinishes);
+        }
         fb.traverse(o => {
-          if (o.isMesh) { o.castShadow = true; enableWaterPasses(o); }
+          if (!o.isMesh) return;
+          o.castShadow = true;
+          enableWaterPasses(o);
+          if (this.spec.enhancedRendering
+            && meshMaterials(o).some(m => !m.transparent || m.opacity >= 0.98)) {
+            enableVesselOcclusion(o);
+          }
         });
         this.group.add(fb);
         this.model = fb;
