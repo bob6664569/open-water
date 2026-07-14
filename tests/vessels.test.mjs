@@ -42,25 +42,32 @@ test('Redline Phantom keeps its drag-racing identity and twin propeller rig', ()
   assert.ok(spec.pitchTargetRad > 0);
 });
 
-test('outboards and jet ski reuse a restrained Redline-style rooster tail', () => {
-  const redline = VESSEL_SPECS.boat.effects.roosterTail;
-  const outboards = ['zefiro', 'assault-boat', 'smolbot', 'zodiac_boat'];
-
-  for (const id of outboards) {
-    const profile = VESSEL_SPECS[id].effects.roosterTail;
-    assert.ok(profile.rate > 0 && profile.rate < redline.rate, `${id} rate must stay restrained`);
-    assert.ok(profile.height > 0 && profile.height < redline.height, `${id} height must stay restrained`);
-    assert.ok(profile.velocity > 0 && profile.velocity < 1, `${id} velocity must stay restrained`);
-    assert.ok(profile.size > 0 && profile.size < 1, `${id} particle size must stay restrained`);
+test('only Redline Phantom owns the high rooster-tail profile', () => {
+  for (const [id, spec] of Object.entries(VESSEL_SPECS)) {
+    assert.equal(
+      Boolean(spec.effects.roosterTail),
+      id === 'boat',
+      `${id} must use the shared low stern-spray rule`,
+    );
   }
+});
 
-  const jetSki = VESSEL_SPECS['seadoo-gti'].effects.roosterTail;
-  assert.ok(jetSki.rate < Math.min(...outboards.map(
-    id => VESSEL_SPECS[id].effects.roosterTail.rate,
-  )));
-  assert.ok(jetSki.size < Math.min(...outboards.map(
-    id => VESSEL_SPECS[id].effects.roosterTail.size,
-  )));
+test('outboard stern-spray profiles are stronger than the shared yacht curl', () => {
+  const profiled = ['zefiro', 'assault-boat', 'seadoo-gti', 'smolbot', 'zodiac_boat'];
+  for (const id of profiled) {
+    const profile = VESSEL_SPECS[id].effects.sternSpray;
+    assert.ok(profile.strength >= 0.8, `${id} needs a visible powered stern spray`);
+    assert.ok(profile.height >= 0.8, `${id} needs more lift than a yacht`);
+    assert.ok(profile.accelerationBoost >= 0.6, `${id} must react to acceleration`);
+  }
+  assert.ok(
+    VESSEL_SPECS['assault-boat'].effects.sternSpray.height
+      > VESSEL_SPECS.zefiro.effects.sternSpray.height,
+  );
+  assert.ok(
+    VESSEL_SPECS.zodiac_boat.effects.sternSpray.strength
+      > VESSEL_SPECS.zefiro.effects.sternSpray.strength,
+  );
 });
 
 test('vessel physics sheets satisfy core numeric invariants', async t => {

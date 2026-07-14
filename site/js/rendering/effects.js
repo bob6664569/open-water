@@ -6,6 +6,56 @@ export function turnSpraySpeedBoost(forwardSpeed) {
   return 1 + highSpeed * (1.7 + highSpeed * 1.3);
 }
 
+const DEFAULT_STERN_SPRAY = Object.freeze({
+  strength: 1.25,
+  height: 0.72,
+  spread: 1.55,
+  size: 1.25,
+  accelerationBoost: 0.12,
+  speedStart: 0.05,
+  speedFull: 0.65,
+});
+
+export function sternSprayAccelerationEnergy(
+  forwardAcceleration,
+  maxSpeed,
+  wet = 1,
+) {
+  const strongAcceleration = Math.max(0.45, Math.max(maxSpeed, 1) * 0.045);
+  return THREE.MathUtils.smoothstep(
+    Math.max(0, forwardAcceleration),
+    strongAcceleration,
+    strongAcceleration * 2.4,
+  ) * wet;
+}
+
+export function sternSprayEnergy(
+  forwardSpeed,
+  forwardAcceleration,
+  maxSpeed,
+  wet = 1,
+  speedStart = DEFAULT_STERN_SPRAY.speedStart,
+  speedFull = DEFAULT_STERN_SPRAY.speedFull,
+) {
+  const safeMaxSpeed = Math.max(maxSpeed, 1);
+  const speedRatio = Math.max(0, forwardSpeed) / safeMaxSpeed;
+  const highSpeedEnergy = THREE.MathUtils.smoothstep(
+    speedRatio,
+    speedStart,
+    Math.max(speedStart + 0.05, speedFull),
+  );
+  const accelerationEnergy = sternSprayAccelerationEnergy(
+    forwardAcceleration,
+    safeMaxSpeed,
+    wet,
+  );
+  return THREE.MathUtils.clamp(
+    Math.max(highSpeedEnergy * wet, accelerationEnergy * 0.9),
+    0,
+    1,
+  );
+}
+
 function makeDropletTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -719,6 +769,8 @@ export class BoatEffects {
     this._impactQueue = [];
     this._effectTime = 0;
     this._lastForwardSpeed = 0;
+    this._lastSternForwardSpeed = 0;
+    this._sternSpeedValid = false;
     this._exhaustPopTimer = 0;
     this._exhaustBurstTime = 0;
     this._exhaustBurstDuration = 0.1;
@@ -898,8 +950,6 @@ export class BoatEffects {
     }
     const waterY = this.wf.heightAt(this._v.x, this._v.z);
     const rate = config.rate ?? 1;
-    const velocityScale = config.velocity ?? 1;
-    const sizeScale = config.size ?? 1;
     this._roosterPulseTimer -= dt;
     if (this._roosterPulseTimer <= 0) {
       this._roosterPulseTarget = 0.55 + Math.random() * 1.15;
@@ -914,9 +964,9 @@ export class BoatEffects {
     while (this._roosterAcc >= 1) {
       this._roosterAcc -= 1;
       const core = Math.random() < 0.68;
-      const backward = (core
+      const backward = core
         ? 7 + Math.random() * (8 + energy * 10)
-        : 4 + Math.random() * (14 + energy * 17)) * velocityScale;
+        : 4 + Math.random() * (14 + energy * 17);
       const upward = (3.4 + Math.pow(Math.random(), 0.58) * (7 + energy * 11))
         * (config.height ?? 1) * (0.82 + pulse * 0.18);
       const sideways = ((Math.random() - 0.5) * (core ? 3.2 : 11)
@@ -936,9 +986,9 @@ export class BoatEffects {
         boat.vel.z * 0.07 - this._f.z * backward + this._r.z * sideways,
         1.35 + Math.random() * (0.95 + energy * 1.15),
         (core ? 1.1 + Math.random() * 1.7 : 0.55 + Math.random() * 1.45)
-          * (0.9 + energy * 0.78) * sizeScale,
+          * (0.9 + energy * 0.78),
         core ? 0.25 + Math.random() * 0.24 : 0.14 + Math.random() * 0.2,
-        (0.88 + Math.random() * 1.3) * sizeScale,
+        0.88 + Math.random() * 1.3,
       );
     }
 
@@ -947,7 +997,7 @@ export class BoatEffects {
     while (this._roosterMistAcc >= 1) {
       this._roosterMistAcc -= 1;
       const across = (Math.random() - 0.5) * boat.spec.beam * 0.74;
-      const backward = (4.5 + Math.random() * (8 + energy * 8)) * velocityScale;
+      const backward = 4.5 + Math.random() * (8 + energy * 8);
       const sideways = ((Math.random() - 0.5) * (4 + energy * 8)
         + this._roosterSideBias * 2.2) * (config.spread ?? 1);
       const travel = Math.random();
@@ -962,9 +1012,9 @@ export class BoatEffects {
         (2.4 + Math.random() * (4.5 + energy * 5.5)) * (config.height ?? 1),
         boat.vel.z * 0.09 - this._f.z * backward + this._r.z * sideways,
         1.05 + Math.random() * 1.5,
-        (0.72 + Math.random() * 1.45) * (0.86 + energy * 0.34) * sizeScale,
+        (0.72 + Math.random() * 1.45) * (0.86 + energy * 0.34),
         0.045 + Math.random() * 0.075,
-        (1.1 + Math.random() * 1.05) * sizeScale,
+        1.1 + Math.random() * 1.05,
       );
     }
     this._roosterPrevOrigin.copy(this._v);
@@ -997,6 +1047,8 @@ export class BoatEffects {
       this._turnPulseTimer = 0;
       this._turnOriginValid = false;
       this._lastForwardSpeed = 0;
+      this._lastSternForwardSpeed = 0;
+      this._sternSpeedValid = false;
       this._exhaustPopTimer = this._exhaustBurstTime = 0;
       this._roosterPulse = this._roosterPulseTarget = 1;
       this._roosterPulseTimer = 0;
@@ -1349,40 +1401,90 @@ export class BoatEffects {
       this.turnViolence = 0;
     }
 
-    const forwardPower = Math.max(b.throttle, 0) * b.propWet;
-    const sternEnergy = THREE.MathUtils.clamp(
-      Math.max(0, forwardSpeed - 1.4) / Math.max(b.spec.maxPropSpeed, 1) * 0.75
-        + forwardPower * 0.72,
-      0, 1.35,
-    );
+    const forwardAcceleration = this._sternSpeedValid && dt > 0
+      ? (forwardSpeed - this._lastSternForwardSpeed) / dt
+      : 0;
+    this._lastSternForwardSpeed = forwardSpeed;
+    this._sternSpeedValid = true;
+    const sternProfile = fx.roosterTail
+      ? null
+      : (fx.sternSpray ?? DEFAULT_STERN_SPRAY);
+    const sternEnergy = sternProfile ? sternSprayEnergy(
+      forwardSpeed,
+      forwardAcceleration,
+      b.spec.maxPropSpeed,
+      THREE.MathUtils.clamp(Math.max(b.propWet, b.wet), 0, 1),
+      sternProfile.speedStart,
+      sternProfile.speedFull,
+    ) : 0;
     if (sternEnergy > 0.025 && this._propPositions.length) {
+      const accelerationEnergy = sternSprayAccelerationEnergy(
+        forwardAcceleration,
+        b.spec.maxPropSpeed,
+        THREE.MathUtils.clamp(Math.max(b.propWet, b.wet), 0, 1),
+      );
       const propGain = Math.sqrt(this._propPositions.length);
-      this._sternAcc += dt * (12 + forwardSpeed * 6.2) * sternEnergy * propGain;
+      const strength = sternProfile.strength ?? 1;
+      const height = sternProfile.height ?? 1;
+      const spreadScale = sternProfile.spread ?? 1;
+      const sizeScale = sternProfile.size ?? 1;
+      const accelerationBurst = accelerationEnergy
+        * (sternProfile.accelerationBoost ?? DEFAULT_STERN_SPRAY.accelerationBoost);
+      const hullSize = THREE.MathUtils.clamp(
+        Math.sqrt(b.spec.beam / 3),
+        0.78,
+        2,
+      );
+      this._sternAcc += dt * (8 + forwardSpeed * 2.2)
+        * sternEnergy * strength * propGain * (1 + accelerationBurst * 1.8);
       while (this._sternAcc >= 1) {
         this._sternAcc -= 1;
         const prop = this._propPositions[
           Math.floor(Math.random() * this._propPositions.length)
         ];
         const waterY = this.wf.heightAt(prop.x, prop.z);
-        const across = (Math.random() - 0.5) * b.spec.beam * 0.16;
-        const behind = 0.08 + Math.random() * (0.35 + sternEnergy * 0.35);
-        const backward = 1.4 + Math.random() * (2.4 + sternEnergy * 4.2);
-        const spread = (Math.random() - 0.5) * (1.2 + sternEnergy * 1.8);
-        this.droplets.spawn(
+        const across = (Math.random() - 0.5) * b.spec.beam * 0.28 * spreadScale;
+        const behind = 0.06 + Math.random() * (0.24 + sternEnergy * 0.22);
+        const backward = (0.8 + Math.random() * (1.2 + sternEnergy * 2.1))
+          * (1 + accelerationBurst * 0.7);
+        const spread = (Math.random() - 0.5)
+          * (0.8 + sternEnergy * 1.7) * spreadScale;
+        const upward = (0.28 + Math.random() * (0.75 + sternEnergy * 1.55))
+          * height * (1 + accelerationBurst);
+        this.impactFoam.spawn(
           prop.x + this._r.x * across - this._f.x * behind,
           waterY + 0.035,
           prop.z + this._r.z * across - this._f.z * behind,
           b.vel.x * 0.16 - this._f.x * backward + this._r.x * spread,
-          0.65 + Math.random() * (1.25 + sternEnergy * 2.4),
+          upward,
           b.vel.z * 0.16 - this._f.z * backward + this._r.z * spread,
-          0.42 + Math.random() * 0.48,
-          (0.28 + Math.random() * 0.48) * (0.85 + sternEnergy * 0.45),
-          0.46 + Math.random() * 0.34,
-          0.72,
+          0.55 + Math.random() * (0.4 + sternEnergy * 0.34),
+          (0.75 + Math.random() * 1.2)
+            * (0.9 + sternEnergy * 0.45) * sizeScale * hullSize,
+          0.48 + Math.random() * 0.34,
+          (0.45 + Math.random() * 0.55) * sizeScale * hullSize,
         );
+        const droplets = 1 + (Math.random() < sternEnergy * strength * 0.55 ? 1 : 0);
+        for (let i = 0; i < droplets; i++) {
+          this.droplets.spawn(
+            prop.x + this._r.x * across - this._f.x * behind,
+            waterY + 0.04,
+            prop.z + this._r.z * across - this._f.z * behind,
+            b.vel.x * 0.14 - this._f.x * backward
+              + this._r.x * spread * (0.7 + Math.random() * 0.45),
+            upward * (0.82 + Math.random() * 0.35),
+            b.vel.z * 0.14 - this._f.z * backward
+              + this._r.z * spread * (0.7 + Math.random() * 0.45),
+            0.34 + Math.random() * 0.42,
+            (0.2 + Math.random() * 0.38) * sizeScale * hullSize,
+            0.38 + Math.random() * 0.32,
+            0.42 * sizeScale * hullSize,
+          );
+        }
       }
 
-      this._wakeFoamAcc += dt * (5 + forwardSpeed * 2.4) * sternEnergy * propGain;
+      this._wakeFoamAcc += dt * (4 + forwardSpeed * 1.6)
+        * sternEnergy * strength * propGain * (1 + accelerationBurst * 0.65);
       while (this._wakeFoamAcc >= 1) {
         this._wakeFoamAcc -= 1;
         const prop = this._propPositions[
@@ -1391,22 +1493,24 @@ export class BoatEffects {
         const waterY = this.wf.heightAt(prop.x, prop.z);
         const across = (Math.random() - 0.5) * b.spec.beam * 0.3;
         const behind = Math.random() * 0.5;
-        const backward = 0.8 + Math.random() * (1.8 + sternEnergy * 2.2);
+        const backward = 0.5 + Math.random() * (0.8 + sternEnergy * 1.1);
         this.wakeFoam.spawn(
           prop.x + this._r.x * across - this._f.x * behind,
           waterY + 0.02,
           prop.z + this._r.z * across - this._f.z * behind,
           b.vel.x * 0.1 - this._f.x * backward + this._r.x * (Math.random() - 0.5),
-          0.3 + Math.random() * (0.75 + sternEnergy),
+          (0.1 + Math.random() * (0.22 + sternEnergy * 0.36)) * height,
           b.vel.z * 0.1 - this._f.z * backward + this._r.z * (Math.random() - 0.5),
-          0.38 + Math.random() * 0.45,
-          (0.3 + Math.random() * 0.5) * (0.9 + sternEnergy * 0.35),
+          0.3 + Math.random() * 0.32,
+          (0.3 + Math.random() * 0.46)
+            * (0.9 + sternEnergy * 0.28) * sizeScale * hullSize,
           0.12 + Math.random() * 0.14,
           0.35 + Math.random() * 0.35,
         );
       }
 
-      this._sternMistAcc += dt * (1.4 + forwardSpeed * 0.7) * sternEnergy * propGain;
+      this._sternMistAcc += dt * (1.1 + forwardSpeed * 0.48)
+        * sternEnergy * strength * propGain * (1 + accelerationBurst * 1.4);
       while (this._sternMistAcc >= 1) {
         this._sternMistAcc -= 1;
         const prop = this._propPositions[
@@ -1415,20 +1519,23 @@ export class BoatEffects {
         const waterY = this.wf.heightAt(prop.x, prop.z);
         const spread = (Math.random() - 0.5) * b.spec.beam * 0.35;
         const behind = Math.random() * 0.55;
-        const backward = 0.7 + Math.random() * 1.4;
+        const backward = 0.5 + Math.random() * 0.9;
         this.mist.spawn(
           prop.x + this._r.x * spread - this._f.x * behind,
           waterY + 0.08,
           prop.z + this._r.z * spread - this._f.z * behind,
           b.vel.x * 0.08 - this._f.x * backward,
-          0.32 + Math.random() * 0.72,
+          (0.15 + Math.random() * 0.4) * height,
           b.vel.z * 0.08 - this._f.z * backward,
-          0.62 + Math.random() * 0.6,
-          (0.72 + Math.random() * 0.95) * (0.85 + sternEnergy * 0.35),
-          0.07 + Math.random() * 0.055,
-          0.95,
+          0.48 + Math.random() * 0.52,
+          (0.52 + Math.random() * 0.72)
+            * (0.85 + sternEnergy * 0.25) * sizeScale * hullSize,
+          0.04 + Math.random() * 0.035,
+          0.55,
         );
       }
+    } else {
+      this._sternAcc = this._wakeFoamAcc = this._sternMistAcc = 0;
     }
 
     if (b.slam > 0.8 && this._impactCooldown <= 0) {

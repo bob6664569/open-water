@@ -209,9 +209,10 @@ export const VESSEL_SPECS = {
       sampleGain: 0.44, rpmRise: 3.0, rpmFall: 1.8, propGain: 0.9,
     },
     effects: {
-      roosterTail: {
-        speedStart: 5, speedFull: 18,
-        rate: 0.34, height: 0.58, spread: 0.78, velocity: 0.64, size: 0.58,
+      sternSpray: {
+        strength: 1.2, height: 1.25, spread: 0.95, size: 1.05,
+        accelerationBoost: 0.8,
+        speedStart: 0.3, speedFull: 0.9,
       },
     },
     waterMask: {
@@ -253,9 +254,10 @@ export const VESSEL_SPECS = {
       sampleGain: 0.5, rpmRise: 2.65, rpmFall: 1.65, propGain: 1.12,
     },
     effects: {
-      roosterTail: {
-        speedStart: 6, speedFull: 25,
-        rate: 0.42, height: 0.66, spread: 0.84, velocity: 0.7, size: 0.68,
+      sternSpray: {
+        strength: 1.65, height: 1.85, spread: 1.2, size: 1.4,
+        accelerationBoost: 1.2,
+        speedStart: 0.24, speedFull: 0.86,
       },
     },
     waterMask: {
@@ -291,9 +293,10 @@ export const VESSEL_SPECS = {
       throttleExponent: 0.82, propGain: 1.35,
     },
     effects: {
-      roosterTail: {
-        speedStart: 4, speedFull: 22,
-        rate: 0.26, height: 0.46, spread: 0.62, velocity: 0.52, size: 0.42,
+      sternSpray: {
+        strength: 1.3, height: 1.4, spread: 0.86, size: 0.9,
+        accelerationBoost: 1.15,
+        speedStart: 0.26, speedFull: 0.88,
       },
     },
     rig: {
@@ -381,9 +384,10 @@ export const VESSEL_SPECS = {
       sampleGain: 0.42, rpmRise: 3.2, rpmFall: 1.9, propGain: 0.95,
     },
     effects: {
-      roosterTail: {
-        speedStart: 4.5, speedFull: 13,
-        rate: 0.3, height: 0.52, spread: 0.72, velocity: 0.58, size: 0.52,
+      sternSpray: {
+        strength: 1.1, height: 1.05, spread: 0.88, size: 1,
+        accelerationBoost: 0.65,
+        speedStart: 0.34, speedFull: 0.92,
       },
     },
     waterMask: {
@@ -519,9 +523,10 @@ export const VESSEL_SPECS = {
       sampleGain: 0.42, rpmRise: 3.4, rpmFall: 2.0, propGain: 1.0,
     },
     effects: {
-      roosterTail: {
-        speedStart: 5, speedFull: 20,
-        rate: 0.4, height: 0.6, spread: 0.82, velocity: 0.66, size: 0.62,
+      sternSpray: {
+        strength: 1.55, height: 1.65, spread: 1.12, size: 1.25,
+        accelerationBoost: 1.1,
+        speedStart: 0.24, speedFull: 0.86,
       },
     },
     waterMask: {

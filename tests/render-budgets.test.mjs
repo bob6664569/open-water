@@ -74,7 +74,12 @@ Object.defineProperties(globalThis, {
 
 const [
   { Ocean, makeOceanGridGeometry, makeWaterNormalTexture },
-  { BoatEffects, turnSpraySpeedBoost },
+  {
+    BoatEffects,
+    sternSprayAccelerationEnergy,
+    sternSprayEnergy,
+    turnSpraySpeedBoost,
+  },
   { WeatherEffects },
   { PerceptualEffects },
   { Seabed },
@@ -393,6 +398,81 @@ test('the lateral water wall exists at low speed and scales violently by 175 kno
   slowEffects.update(1 / 15);
   assert.ok(slowEffects.turnSheet.activeCount > 0);
   assert.ok(fastEffects.turnSheet.activeCount > slowEffects.turnSheet.activeCount * 20);
+});
+
+test('shared stern spray requires high speed or strong relative acceleration', () => {
+  assert.equal(sternSprayEnergy(1, 0, 20, 1), 0);
+  assert.ok(sternSprayEnergy(6, 0, 20, 1) > 0.1);
+  assert.ok(sternSprayEnergy(19, 0, 20, 1) > 0.9);
+  assert.ok(sternSprayEnergy(10, 3, 20, 1) > 0.75);
+  assert.equal(sternSprayEnergy(20, 3, 20, 0), 0);
+  assert.equal(sternSprayAccelerationEnergy(0.5, 20, 1), 0);
+  assert.ok(sternSprayAccelerationEnergy(3, 20, 1) > 0.9);
+  assert.equal(sternSprayAccelerationEnergy(3, 20, 0), 0);
+});
+
+test('stern spray stays low on yachts and gains volume with an outboard profile', () => {
+  const waveField = {
+    heightAt: () => 0,
+    velocityAt: (_x, _z, out) => out.set(0, 0, 0),
+  };
+  const boat = {
+    group: new THREE.Group(),
+    pos: new THREE.Vector3(),
+    vel: new THREE.Vector3(0, 0, 10),
+    quat: new THREE.Quaternion(),
+    throttle: 1,
+    propWet: 1,
+    wet: 1,
+    speedKn: 19.4384,
+    steer: 0,
+    _effSteer: 0,
+    angVelB: new THREE.Vector3(),
+    slam: 0,
+    visualRig: null,
+    spec: {
+      id: 'motoryacht', length: 10.7, beam: 3.35, restDraft: 0.48,
+      maxPropSpeed: 16.5, maxSteerRad: THREE.MathUtils.degToRad(22),
+      buoyPoints: [],
+      effects: { prop: new THREE.Vector3(0, -0.5, -5.2) },
+    },
+    worldPoint(point, out) { return out.copy(point).add(this.pos); },
+  };
+  boat.vel.z = boat.spec.maxPropSpeed;
+  boat.speedKn = boat.vel.z * 1.94384;
+  const yachtEffects = new BoatEffects(new THREE.Scene(), waveField, boat);
+  yachtEffects.update(0.2);
+
+  assert.equal(yachtEffects.roosterTail.activeCount, 0);
+  assert.equal(yachtEffects.roosterMist.activeCount, 0);
+  assert.ok(yachtEffects.impactFoam.activeCount > 0, 'a yacht must keep a visible stern curl');
+  const verticalSpeeds = Array.from(
+    { length: yachtEffects.impactFoam.activeCount },
+    (_, activeIndex) => yachtEffects.impactFoam.vel[
+      yachtEffects.impactFoam.activeIndices[activeIndex] * 3 + 1
+    ],
+  );
+  assert.ok(Math.max(...verticalSpeeds) <= 2.1, 'yacht spray must hug the water surface');
+
+  const outboard = {
+    ...boat,
+    spec: {
+      ...boat.spec,
+      id: 'assault-boat',
+      effects: {
+        ...boat.spec.effects,
+        sternSpray: {
+          strength: 1.65, height: 1.85, spread: 1.2, size: 1.4,
+          speedStart: 0.24, speedFull: 0.86,
+        },
+      },
+    },
+  };
+  const outboardEffects = new BoatEffects(new THREE.Scene(), waveField, outboard);
+  outboardEffects.update(0.2);
+
+  assert.ok(outboardEffects.impactFoam.activeCount > yachtEffects.impactFoam.activeCount);
+  assert.ok(yachtEffects.propWash.activeCount > 0, 'submerged prop wash must remain active');
 });
 
 test('particle pools track live slots and coalesce GPU buffer uploads', () => {
