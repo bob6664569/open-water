@@ -11,6 +11,12 @@ const CLOUDINESS_BY_PRESET = {
   3: 0.62,
   4: 1,
 };
+const ATMOSPHERIC_DEPTH = Object.freeze([
+  Object.freeze({ cloudiness: 0, fogNear: 240, fogFar: 920, haze: 0.055 }),
+  Object.freeze({ cloudiness: 0.24, fogNear: 180, fogFar: 690, haze: 0.075 }),
+  Object.freeze({ cloudiness: 0.62, fogNear: 105, fogFar: 410, haze: 0.12 }),
+  Object.freeze({ cloudiness: 1, fogNear: 48, fogFar: 190, haze: 0.19 }),
+]);
 
 export function cloudinessForWaveHeight(height) {
   if (height <= SEA_PRESETS[1].hs) return CLOUDINESS_BY_PRESET[1];
@@ -29,6 +35,26 @@ export function cloudinessForWaveHeight(height) {
     );
   }
   return 1;
+}
+
+export function atmosphericDepthForCloudiness(cloudiness, target = {}) {
+  const amount = THREE.MathUtils.clamp(cloudiness, 0, 1);
+  let lower = ATMOSPHERIC_DEPTH[0];
+  let upper = ATMOSPHERIC_DEPTH[ATMOSPHERIC_DEPTH.length - 1];
+  for (let index = 1; index < ATMOSPHERIC_DEPTH.length; index++) {
+    upper = ATMOSPHERIC_DEPTH[index];
+    if (amount <= upper.cloudiness) break;
+    lower = upper;
+  }
+  const blend = THREE.MathUtils.smoothstep(
+    amount,
+    lower.cloudiness,
+    upper.cloudiness,
+  );
+  target.fogNear = THREE.MathUtils.lerp(lower.fogNear, upper.fogNear, blend);
+  target.fogFar = THREE.MathUtils.lerp(lower.fogFar, upper.fogFar, blend);
+  target.haze = THREE.MathUtils.lerp(lower.haze, upper.haze, blend);
+  return target;
 }
 
 export function analyzeHdrTexture(texture) {
@@ -118,11 +144,16 @@ export class EnvironmentController {
     this.ocean = null;
     this.cloudiness = waveField.preset === 1
       ? 0 : cloudinessForWaveHeight(waveField.significantWaveHeight);
+    this.atmosphereTarget = atmosphericDepthForCloudiness(this.cloudiness);
     this.cloudOffset = new THREE.Vector2();
     this.cloudShadowScale = isTouch ? 0.55 : 0.82;
     this.cloudOctaves = isTouch ? 3 : 4;
 
-    scene.fog = new THREE.Fog(CLEAR_FOG, 180, 640);
+    scene.fog = new THREE.Fog(
+      CLEAR_FOG,
+      this.atmosphereTarget.fogNear,
+      this.atmosphereTarget.fogFar,
+    );
     this.sunLight = new THREE.DirectionalLight(0xfff2dd, 2.0);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(isTouch ? 1024 : 2048, isTouch ? 1024 : 2048);
@@ -145,6 +176,8 @@ export class EnvironmentController {
         uStorm: { value: 0 },
         uSunDir: { value: this.sun },
         uLightning: { value: 0 },
+        uFogColor: { value: scene.fog.color },
+        uHaze: { value: this.atmosphereTarget.haze },
       },
       defines: { CLOUD_OCTAVES: this.cloudOctaves },
       vertexShader: /* glsl */`
@@ -163,6 +196,8 @@ export class EnvironmentController {
         uniform float uStorm;
         uniform vec3 uSunDir;
         uniform float uLightning;
+        uniform vec3 uFogColor;
+        uniform float uHaze;
         varying vec3 vSkyDirection;
 
         float cloudHash(vec2 p) {
@@ -235,9 +270,15 @@ export class EnvironmentController {
             cloudAlpha = cloud * skyGate * mix(0.44, 0.82, uCloudiness);
           }
 
-          float alpha = cloudAlpha + paradiseAlpha * (1.0 - cloudAlpha);
-          vec3 premultiplied = cloudColor * cloudAlpha
+          float baseAlpha = cloudAlpha + paradiseAlpha * (1.0 - cloudAlpha);
+          vec3 basePremultiplied = cloudColor * cloudAlpha
             + tint * paradiseAlpha * (1.0 - cloudAlpha);
+          float hazeShape = pow(horizon, 1.35)
+                          * smoothstep(-0.08, 0.035, skyDirection.y);
+          float hazeAlpha = uHaze * hazeShape;
+          float alpha = hazeAlpha + baseAlpha * (1.0 - hazeAlpha);
+          vec3 premultiplied = uFogColor * hazeAlpha
+            + basePremultiplied * (1.0 - hazeAlpha);
           gl_FragColor = vec4(premultiplied / max(alpha, 0.001), alpha);
         }
       `,
@@ -320,14 +361,21 @@ export class EnvironmentController {
       .lerp(this.overcastSunColor, this.cloudiness)
       .lerp(this.stormSunColor, storm * 0.72);
     sunLight.color.lerp(this.sunTargetColor, ease);
+    atmosphericDepthForCloudiness(this.cloudiness, this.atmosphereTarget);
     scene.fog.near = THREE.MathUtils.lerp(
       scene.fog.near,
-      THREE.MathUtils.lerp(180, 54, Math.pow(this.cloudiness, 1.16)),
+      this.atmosphereTarget.fogNear,
       ease,
     );
     scene.fog.far = THREE.MathUtils.lerp(
       scene.fog.far,
-      THREE.MathUtils.lerp(640, 215, Math.pow(this.cloudiness, 1.12)),
+      this.atmosphereTarget.fogFar,
+      ease,
+    );
+    const hazeUniform = this.paradiseSkyMaterial.uniforms.uHaze;
+    hazeUniform.value = THREE.MathUtils.lerp(
+      hazeUniform.value,
+      this.atmosphereTarget.haze,
       ease,
     );
     this.atmosphereFogColor.copy(this.clearFogColor)

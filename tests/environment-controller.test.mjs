@@ -3,6 +3,7 @@ import test from 'node:test';
 import * as THREE from 'three';
 import {
   analyzeHdrTexture,
+  atmosphericDepthForCloudiness,
   cloudinessForWaveHeight,
   EnvironmentController,
 } from '../site/js/rendering/environment-controller.js';
@@ -95,6 +96,26 @@ test('cloud cover follows every sea preset and clamps beyond the authored range'
   assert.ok(cloudinessForWaveHeight(1.5) < 0.62);
 });
 
+test('atmospheric depth thickens progressively without reaching the near field', () => {
+  const profiles = [0, 0.24, 0.62, 1]
+    .map(value => atmosphericDepthForCloudiness(value));
+  assert.deepEqual(
+    profiles.map(profile => profile.fogNear),
+    [...profiles.map(profile => profile.fogNear)].sort((a, b) => b - a),
+  );
+  assert.deepEqual(
+    profiles.map(profile => profile.fogFar),
+    [...profiles.map(profile => profile.fogFar)].sort((a, b) => b - a),
+  );
+  assert.deepEqual(
+    profiles.map(profile => profile.haze),
+    [...profiles.map(profile => profile.haze)].sort((a, b) => a - b),
+  );
+  assert.equal(atmosphericDepthForCloudiness(-2).fogFar, profiles[0].fogFar);
+  assert.equal(atmosphericDepthForCloudiness(3).fogFar, profiles[3].fogFar);
+  assert.ok(profiles[3].fogNear > 40);
+});
+
 test('loads the device HDR, synchronizes sun consumers and releases PMREM work', () => {
   const fixture = createFixture({ isTouch: true });
   const { environment, texture, loaderCalls, scene, sunSprite, pmremTexture } = fixture;
@@ -137,16 +158,21 @@ test('atmosphere transitions reuse state and retain calm-only sky behavior', () 
   waveField.significantWaveHeight = 8;
   waveField.preset = 1;
   const fogScratch = environment.atmosphereFogColor;
+  const depthScratch = environment.atmosphereTarget;
   const cloudOffset = environment.cloudOffset;
   const initialCloudiness = environment.cloudiness;
+  const initialFogNear = scene.fog.near;
+  const initialFogFar = scene.fog.far;
+  const initialHaze = environment.paradiseSkyMaterial.uniforms.uHaze.value;
 
   environment.updateAtmosphere(1);
   assert.ok(renderer.toneMappingExposure < 0.85);
   assert.ok(scene.backgroundIntensity < 1);
   assert.ok(scene.environmentIntensity < 1);
   assert.ok(environment.sunLight.intensity < 2);
-  assert.ok(scene.fog.near < 180);
-  assert.ok(scene.fog.far < 640);
+  assert.ok(scene.fog.near > initialFogNear);
+  assert.ok(scene.fog.far > initialFogFar);
+  assert.ok(environment.paradiseSkyMaterial.uniforms.uHaze.value < initialHaze);
   assert.ok(sunSprite.material.opacity < 1);
   assert.ok(environment.paradiseSkyMaterial.uniforms.uCalm.value > 0);
   assert.ok(environment.cloudiness < initialCloudiness);
@@ -154,6 +180,11 @@ test('atmosphere transitions reuse state and retain calm-only sky behavior', () 
     environment.cloudiness);
   assert.equal(environment.cloudOffset, cloudOffset);
   assert.equal(environment.atmosphereFogColor, fogScratch);
+  assert.equal(environment.atmosphereTarget, depthScratch);
+  assert.equal(environment.paradiseSkyMaterial.uniforms.uFogColor.value,
+    scene.fog.color);
+  assert.match(environment.paradiseSkyMaterial.fragmentShader, /hazeShape/);
+  assert.match(environment.paradiseSkyMaterial.fragmentShader, /uFogColor \* hazeAlpha/);
 });
 
 test('clouds build in a crescendo, drift with wind and clear completely in Paradise', () => {
