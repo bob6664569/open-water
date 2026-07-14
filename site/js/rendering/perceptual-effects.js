@@ -6,21 +6,31 @@ const LENS_DROP_COUNT = 72;
 const RIPPLE_LIFETIME = 0.68;
 
 function makeRippleGeometry() {
-  const ring = new THREE.RingGeometry(0.82, 1, 20, 1);
+  const ring = new THREE.RingGeometry(0.90, 1, 20, 1);
   ring.rotateX(-Math.PI / 2);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = ring.index;
   for (const [name, attribute] of Object.entries(ring.attributes)) {
     geometry.setAttribute(name, attribute);
   }
-  geometry.setAttribute('aCenter', new THREE.InstancedBufferAttribute(
+  const centers = new THREE.InstancedBufferAttribute(
     new Float32Array(RIPPLE_COUNT * 3), 3,
-  ));
+  ).setUsage(THREE.DynamicDrawUsage);
+  const normalValues = new Float32Array(RIPPLE_COUNT * 3);
+  for (let i = 0; i < RIPPLE_COUNT; i++) normalValues[i * 3 + 1] = 1;
+  const normals = new THREE.InstancedBufferAttribute(
+    normalValues, 3,
+  ).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('aCenter', centers);
+  geometry.setAttribute('aNormal', normals);
   geometry.setAttribute('aBirth', new THREE.InstancedBufferAttribute(
     new Float32Array(RIPPLE_COUNT).fill(-100), 1,
   ));
   geometry.setAttribute('aRadius', new THREE.InstancedBufferAttribute(
     new Float32Array(RIPPLE_COUNT), 1,
+  ));
+  geometry.setAttribute('aShape', new THREE.InstancedBufferAttribute(
+    new Float32Array(RIPPLE_COUNT * 2), 2,
   ));
   geometry.instanceCount = RIPPLE_COUNT;
   ring.dispose();
@@ -32,28 +42,60 @@ function makeRippleMaterial(uniforms) {
     uniforms,
     vertexShader: /* glsl */`
       attribute vec3 aCenter;
+      attribute vec3 aNormal;
       attribute float aBirth;
       attribute float aRadius;
+      attribute vec2 aShape;
       uniform float uTime;
+      uniform float uStorm;
       varying float vAlpha;
+      varying float vArc;
+      varying float vRoughness;
       void main() {
         float age = clamp((uTime - aBirth) / ${RIPPLE_LIFETIME.toFixed(2)}, 0.0, 1.0);
         float alive = step(0.0, uTime - aBirth) * (1.0 - step(0.995, age));
         float radius = aRadius * (0.08 + age * 0.92);
-        vec3 transformed = position;
-        transformed.xz *= radius;
-        transformed += aCenter;
-        transformed.y += 0.025 + sin(age * 3.14159265) * 0.012;
+        float roughness = smoothstep(0.12, 0.88, uStorm);
+        vec2 local = position.xz;
+        float angle = atan(local.y, local.x);
+        float outline = 1.0 + roughness * (
+          sin(angle * 3.0 + aShape.x) * 0.10
+          + sin(angle * 7.0 - aShape.x * 1.7) * 0.045
+        );
+        local *= radius * outline;
+
+        float cs = cos(aShape.x);
+        float sn = sin(aShape.x);
+        mat2 rotation = mat2(cs, -sn, sn, cs);
+        local = rotation * local;
+        local *= vec2(
+          1.0 + roughness * aShape.y * 0.32,
+          1.0 - roughness * aShape.y * 0.18
+        );
+        local = transpose(rotation) * local;
+
+        vec3 normal = normalize(aNormal);
+        vec3 tangent = normalize(vec3(normal.y, -normal.x, 0.0));
+        vec3 bitangent = normalize(cross(normal, tangent));
+        vec3 transformed = aCenter + tangent * local.x + bitangent * local.y;
+        transformed += normal * (0.025 + sin(age * 3.14159265) * 0.012);
         vAlpha = alive * sin(age * 3.14159265) * (1.0 - age * 0.58);
+        vArc = 0.56 + sin(angle * 2.0 + aShape.x) * 0.31
+          + sin(angle * 5.0 - aShape.x * 1.4) * 0.19;
+        vRoughness = roughness;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
       }
     `,
     fragmentShader: /* glsl */`
       uniform float uStorm;
       varying float vAlpha;
+      varying float vArc;
+      varying float vRoughness;
       void main() {
-        float alpha = vAlpha * uStorm * 0.38;
-        gl_FragColor = vec4(0.78, 0.9, 0.96, alpha);
+        float brokenArc = smoothstep(0.30, 0.67, vArc);
+        float arcMask = mix(1.0, brokenArc, vRoughness * 0.84);
+        float alpha = vAlpha * uStorm * mix(0.38, 0.52, vRoughness) * arcMask;
+        gl_FragColor = vec4(0.62, 0.76, 0.82, alpha);
       }
     `,
     transparent: true,
@@ -176,6 +218,8 @@ export class PerceptualEffects {
     this._forward = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._sample = new THREE.Vector3();
+    this._rippleVelocity = new THREE.Vector3();
+    this._rippleNormal = new THREE.Vector3(0, 1, 0);
     this._toCamera = new THREE.Vector3();
     this._projectedHorizon = new THREE.Vector3();
 
@@ -264,6 +308,7 @@ export class PerceptualEffects {
 
     const lensStorm = this.waveField.preset === 4 ? Math.max(storm, 0.86) : storm;
     this._updateRainRipples(dt, storm);
+    this._updateRippleSurfaces(storm);
     this._updateLens(dt, lensStorm, cameraMode, cameraSprayExposure);
     this._updateHorizon(dt, cameraMode);
   }
@@ -294,9 +339,55 @@ export class PerceptualEffects {
     this.rippleGeometry.attributes.aRadius.setX(
       index, 0.12 + Math.random() * (0.22 + storm * 0.24),
     );
+    this.rippleGeometry.attributes.aShape.setXY(
+      index, Math.random() * Math.PI * 2, 0.28 + Math.random() * 0.72,
+    );
     center.needsUpdate = true;
     this.rippleGeometry.attributes.aBirth.needsUpdate = true;
     this.rippleGeometry.attributes.aRadius.needsUpdate = true;
+    this.rippleGeometry.attributes.aShape.needsUpdate = true;
+  }
+
+  _updateRippleSurfaces(storm) {
+    if (storm <= 0.025) return;
+    const center = this.rippleGeometry.attributes.aCenter;
+    const birth = this.rippleGeometry.attributes.aBirth;
+    const normal = this.rippleGeometry.attributes.aNormal;
+    let changed = false;
+    for (let i = 0; i < this.activeRippleCount; i++) {
+      const age = this.time - birth.getX(i);
+      if (age < 0 || age >= RIPPLE_LIFETIME) continue;
+      const x = center.getX(i);
+      const z = center.getZ(i);
+      center.setY(i, this._sampleRippleSurface(x, z, this._rippleNormal));
+      normal.setXYZ(
+        i, this._rippleNormal.x, this._rippleNormal.y, this._rippleNormal.z,
+      );
+      changed = true;
+    }
+    if (!changed) return;
+    center.needsUpdate = true;
+    normal.needsUpdate = true;
+  }
+
+  _sampleRippleSurface(x, z, normalOut) {
+    if (typeof this.waveField.sampleSurface === 'function') {
+      return this.waveField.sampleSurface(
+        x, z, this._rippleVelocity, normalOut,
+      );
+    }
+    const height = this.waveField.heightAt(x, z);
+    if (typeof this.waveField.normalAt === 'function') {
+      this.waveField.normalAt(x, z, normalOut);
+      return height;
+    }
+    const spacing = 0.3;
+    const left = this.waveField.heightAt(x - spacing, z);
+    const right = this.waveField.heightAt(x + spacing, z);
+    const back = this.waveField.heightAt(x, z - spacing);
+    const front = this.waveField.heightAt(x, z + spacing);
+    normalOut.set(left - right, spacing * 2, back - front).normalize();
+    return height;
   }
 
   _updateLens(dt, storm, cameraMode, cameraSprayExposure = 0) {

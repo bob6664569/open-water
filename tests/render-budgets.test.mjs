@@ -584,9 +584,10 @@ test('perceptual rain uses one budgeted ripple draw and physically triggered len
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 4000);
   camera.position.set(0, 4, 0);
   camera.lookAt(0, 2, 20);
+  let surfacePhase = 0;
   const waveField = {
     significantWaveHeight: 6,
-    heightAt: (x, z) => Math.sin(x * 0.15 + z * 0.08) * 1.8,
+    heightAt: (x, z) => Math.sin(x * 0.15 + z * 0.08 + surfacePhase) * 1.8,
   };
   const boat = {
     pos: new THREE.Vector3(0, 0, 1),
@@ -612,9 +613,36 @@ test('perceptual rain uses one budgeted ripple draw and physically triggered len
   assert.equal(effects.activeRippleCount, 28);
   assert.equal(effects.rippleGeometry.instanceCount, 28);
   assert.equal(effects.rippleGeometry.attributes.aCenter.count, 96);
+  assert.equal(effects.rippleGeometry.attributes.aNormal.count, 96);
+  assert.equal(effects.rippleGeometry.attributes.aShape.count, 96);
+  const rippleVertices = effects.rippleGeometry.attributes.position;
+  let innerRadius = Infinity;
+  for (let i = 0; i < rippleVertices.count; i++) {
+    innerRadius = Math.min(
+      innerRadius, Math.hypot(rippleVertices.getX(i), rippleVertices.getZ(i)),
+    );
+  }
+  assert.ok(
+    Math.abs(innerRadius - 0.9) < 1e-6,
+    'single rain ripples should remain fine rather than reading as thick foam rings',
+  );
   effects.update(0.25, 1, 1);
   assert.ok(effects.rippleCursor > 0);
   assert.equal(effects.ripples.visible, true);
+  const firstRippleY = effects.rippleGeometry.attributes.aCenter.getY(0);
+  const firstRippleNormal = new THREE.Vector3().fromBufferAttribute(
+    effects.rippleGeometry.attributes.aNormal, 0,
+  );
+  assert.ok(
+    Math.abs(firstRippleNormal.x) + Math.abs(firstRippleNormal.z) > 0.001,
+    'storm ripples must align to the local wave slope',
+  );
+  surfacePhase += 0.8;
+  effects.update(1 / 60, 1, 1);
+  assert.notEqual(
+    effects.rippleGeometry.attributes.aCenter.getY(0), firstRippleY,
+    'live storm ripples must keep following the moving surface',
+  );
 
   boat.slam = 1.2;
   boat.slamSpeed = 8;
